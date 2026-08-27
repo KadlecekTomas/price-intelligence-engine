@@ -69,6 +69,7 @@ const STOP_WORDS = new Set([
   "do", "pod", "max", "maximalne", "kc", "korun", "cena", "ceny", "velikost", "velikosti",
   "bez", "a", "nebo", "s", "se", "na", "v", "ve", "co", "je", "jsou", "aby", "kterou",
   "ktery", "ktere", "historicke", "historickemu", "historickymu", "minimum", "minimu", "nejlevnejsi",
+  "tisic", "tisice", "tisicu",
 ]);
 
 export function fold(value: string) {
@@ -86,21 +87,16 @@ function containsAlias(text: string, aliases: string[]) {
 }
 
 function parsePrice(text: string) {
-  const candidates = [
-    /(?:do|pod|max(?:imalne)?)\s*([0-9][0-9 .]*)\s*(?:kc|korun)?/i,
-    /([0-9]+(?:[.,][0-9]+)?)\s*(?:tis(?:ic|ice)?|k)\b/i,
-  ];
-
-  const direct = text.match(candidates[0]);
-  if (direct?.[1]) {
-    const value = Number(direct[1].replace(/[^0-9]/g, ""));
-    return Number.isFinite(value) && value >= 100 ? value : null;
-  }
-
-  const thousands = text.match(candidates[1]);
+  const thousands = text.match(/(?:do|pod|max(?:imalne)?)?\s*([0-9]+(?:[.,][0-9]+)?)\s*(?:tis(?:ic|ice|icu)?|k)\b/i);
   if (thousands?.[1]) {
     const value = Number(thousands[1].replace(",", ".")) * 1000;
-    return Number.isFinite(value) ? Math.round(value) : null;
+    if (Number.isFinite(value)) return Math.round(value);
+  }
+
+  const direct = text.match(/(?:do|pod|max(?:imalne)?)\s*([0-9][0-9 .]*)\s*(?:kc|korun)?/i);
+  if (direct?.[1]) {
+    const value = Number(direct[1].replace(/[^0-9]/g, ""));
+    if (Number.isFinite(value) && value >= 100) return value;
   }
 
   return null;
@@ -114,7 +110,7 @@ function parseSize(raw: string) {
   const waist = upper.match(/\b(W\s?\d{2}(?:\s*[/xX]\s*L?\d{2})?|W\s?\d{2}|L\s?\d{2})\b/);
   if (waist?.[1]) return waist[1].replace(/\s+/g, "");
 
-  const shoe = upper.match(/(?:VELIKOST\s*)\b(3[5-9]|4[0-9]|5[0-2])(?:[.,]5)?\b/);
+  const shoe = upper.match(/(?:VELIKOST|BOTY|TENISKY)\s*(3[5-9]|4[0-9]|5[0-2])(?:[.,]5)?\b/);
   return shoe?.[1] ?? null;
 }
 
@@ -127,7 +123,9 @@ export function parseNaturalSearch(raw: string): SearchIntent {
   const materials: string[] = [];
   for (const [name, aliases] of MATERIALS) {
     if (!containsAlias(text, aliases)) continue;
-    const excluded = aliases.some((alias) => new RegExp(`\\bbez(?:\\s+[^ ]+){0,2}\\s+${fold(alias)}\\b`).test(text));
+    const excluded = aliases.some((alias) =>
+      new RegExp(`\\bbez(?:\\s+[^ ]+){0,2}\\s+${fold(alias)}[a-z]*\\b`).test(text),
+    );
     (excluded ? excludedMaterials : materials).push(name);
   }
 
