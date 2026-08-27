@@ -1,62 +1,57 @@
-import * as cheerio from "cheerio";
-
 const CATEGORY_URL = "https://www.aboutyou.cz/c/muzi/boty-20215";
 const ASSET_BASE = "https://assets.aboutstatic.com";
 
-const ASSETS = [
-  "/assets/ProductStreamOffsetLimitPagination-B_rdh_nD.js",
-  "/assets/products_service-CUlKocfs.js",
-  "/assets/service.grpc-mdxv0dCL-Wo1FjypW.js",
-  "/assets/service.grpc-jmurwCah-Dpt8FyBv.js",
-  "/assets/service.grpc.lazy-_78VexpA-Ci6O5K2M.js",
-  "/assets/service.grpc.lazy-T6u0iCMG-mmQwAI5a.js",
-  "/assets/CategoryLegacy.eager-C0rmPScJ.js",
-  "/assets/helpers-o9VWAYje-B6AgtHuP.js",
-  "/assets/loadingHelpers-C5JTLhjd.js",
+const MAPS = [
+  "/assets/service.grpc-mdxv0dCL-Wo1FjypW.js.map",
+  "/assets/Category.eager-Dx3Cbvep.js.map",
+  "/assets/CategoryLegacy.eager-C0rmPScJ.js.map",
+  "/assets/useTokenBasedStreamPages-DT2r0hpa.js.map",
+  "/assets/useProductStreamStatus-hVlO0b9t.js.map",
+  "/assets/config-CUqyJ_qf.js.map",
 ];
 
-const NEEDLES = [
+const SOURCE_NEEDLES = [
+  "CategoryStreamService/GetProductStreamV2",
+  "GetProductStreamV2",
+  "GetProductStreamRequest",
+  "GetProductStreamV2Request",
   "requestByCategoryId",
-  "ProductStream",
-  "productStream",
   "createGrpcWebTransport",
   "createConnectTransport",
-  "createPromiseClient",
-  "serviceName",
-  "methodName",
-  "baseUrl",
-  "baseURL",
+  "Transport",
+  "tadarida",
   "grpc",
-  "offset",
-  "nextState",
+  "baseUrl",
+  "apiUrl",
+  "endpoint",
 ];
 
 function compact(value) {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function around(text, needle, width = 520) {
-  const index = text.toLowerCase().indexOf(needle.toLowerCase());
-  if (index < 0) return null;
-  return compact(text.slice(Math.max(0, index - width), Math.min(text.length, index + needle.length + width)));
+function occurrences(text, needle, width = 900, max = 3) {
+  const lower = text.toLowerCase();
+  const key = needle.toLowerCase();
+  const results = [];
+  let from = 0;
+  while (results.length < max) {
+    const index = lower.indexOf(key, from);
+    if (index < 0) break;
+    results.push(compact(text.slice(Math.max(0, index - width), Math.min(text.length, index + key.length + width))));
+    from = index + key.length;
+  }
+  return results;
 }
 
-function literals(text) {
-  const values = new Set();
-  const patterns = [
-    /https?:\\?\/\\?\/[^"'`\\\s<>)]+/gi,
-    /["'`]((?:\/)?[A-Za-z0-9_.-]*(?:Product|Catalog|Stream|Category)[A-Za-z0-9_.\/-]*(?:Service)?\/[A-Za-z0-9_.-]+)["'`]/g,
-    /["'`]([A-Za-z0-9_.-]+\.(?:Product|Catalog|Stream|Category)[A-Za-z0-9_.-]*Service)["'`]/g,
-  ];
-
-  for (const pattern of patterns) {
-    for (const match of text.matchAll(pattern)) {
-      const value = compact((match[1] ?? match[0]).replace(/\\\//g, "/"));
-      if (value.length >= 5 && value.length <= 300) values.add(value);
-      if (values.size >= 80) return [...values];
-    }
+function urls(text) {
+  const result = new Set();
+  for (const match of text.matchAll(/https?:\\?\/\\?\/[^"'`\\\s<>)]+/gi)) {
+    const value = (match[0] ?? "").replace(/\\\//g, "/");
+    if (value.length < 350) result.add(value);
+    if (result.size >= 80) break;
   }
-  return [...values];
+  return [...result];
 }
 
 async function fetchText(url) {
@@ -73,78 +68,60 @@ async function fetchText(url) {
   return response.text();
 }
 
-function collectSignals(label, text) {
-  const snippets = [];
-  for (const needle of NEEDLES) {
-    const snippet = around(text, needle);
-    if (snippet) snippets.push({ needle, snippet });
-  }
-  return {
-    label,
-    bytes: text.length,
-    literals: literals(text),
-    snippets: snippets.slice(0, 10),
-  };
-}
+const output = {
+  html: {},
+  sources: [],
+};
 
-async function inspectMap(assetPath) {
-  const mapUrl = new URL(`${assetPath}.map`, ASSET_BASE).toString();
+const html = await fetchText(CATEGORY_URL);
+for (const needle of [
+  "CategoryStreamService/GetProductStreamV2",
+  "aysa_api.services.category_page",
+  "tadarida",
+  "grpc",
+  "apiUrl",
+  "baseUrl",
+]) {
+  const hits = occurrences(html, needle, 1100, 2);
+  if (hits.length) output.html[needle] = hits;
+}
+output.html.urls = urls(html).filter((value) => /aboutyou|aysa|tadarida|api|grpc|scayle/i.test(value)).slice(0, 30);
+
+for (const mapPath of MAPS) {
+  const mapUrl = new URL(mapPath, ASSET_BASE).toString();
   try {
     const raw = await fetchText(mapUrl);
     const map = JSON.parse(raw);
     const sources = Array.isArray(map.sources) ? map.sources : [];
     const contents = Array.isArray(map.sourcesContent) ? map.sourcesContent : [];
-    const selected = [];
 
     for (let index = 0; index < contents.length; index += 1) {
       const content = typeof contents[index] === "string" ? contents[index] : "";
       if (!content) continue;
-      if (!NEEDLES.some((needle) => content.toLowerCase().includes(needle.toLowerCase()))) continue;
-      const signal = collectSignals(String(sources[index] ?? `source-${index}`), content);
-      if (signal.snippets.length || signal.literals.length) selected.push(signal);
-      if (selected.length >= 8) break;
+      const source = String(sources[index] ?? `source-${index}`);
+      const haystack = `${source}\n${content}`.toLowerCase();
+      if (!SOURCE_NEEDLES.some((needle) => haystack.includes(needle.toLowerCase()))) continue;
+
+      const hits = {};
+      for (const needle of SOURCE_NEEDLES) {
+        const found = occurrences(content, needle, 1300, 2);
+        if (found.length) hits[needle] = found;
+      }
+      if (!Object.keys(hits).length) continue;
+
+      output.sources.push({
+        map: mapPath,
+        source,
+        urls: urls(content).filter((value) => /aboutyou|aysa|tadarida|api|grpc|scayle/i.test(value)).slice(0, 20),
+        hits,
+      });
+      if (output.sources.length >= 20) break;
     }
-
-    return { mapUrl, selected };
   } catch (error) {
-    return { mapUrl, error: error instanceof Error ? error.message : String(error), selected: [] };
+    output.sources.push({ map: mapPath, error: error instanceof Error ? error.message : String(error) });
   }
 }
 
-const html = await fetchText(CATEGORY_URL);
-const $ = cheerio.load(html);
-const productLinks = new Set();
-$('a[href*="/p/"]').each((_, element) => {
-  const href = $(element).attr("href");
-  if (href) productLinks.add(new URL(href, CATEGORY_URL).pathname);
-});
-
-const htmlSignals = collectSignals("category-html", html);
-const assetSignals = [];
-const mapSignals = [];
-
-for (const assetPath of ASSETS) {
-  const url = new URL(assetPath, ASSET_BASE).toString();
-  try {
-    const text = await fetchText(url);
-    const signal = collectSignals(assetPath, text);
-    if (signal.snippets.length || signal.literals.length) assetSignals.push(signal);
-  } catch (error) {
-    assetSignals.push({ label: assetPath, error: error instanceof Error ? error.message : String(error) });
-  }
-
-  const map = await inspectMap(assetPath);
-  if (map.selected.length) mapSignals.push(map);
-}
-
-const output = {
-  ssrProducts: productLinks.size,
-  htmlLiterals: htmlSignals.literals.slice(0, 20),
-  htmlSnippets: htmlSignals.snippets.slice(0, 5),
-  assets: assetSignals.slice(0, 12),
-  maps: mapSignals.slice(0, 12),
-};
-
-console.log("AY_HIGH_SIGNAL_BEGIN");
+console.log("AY_STREAM_SIGNAL_BEGIN");
 console.log(JSON.stringify(output));
-console.log("AY_HIGH_SIGNAL_END");
+console.log("AY_STREAM_SIGNAL_END");
