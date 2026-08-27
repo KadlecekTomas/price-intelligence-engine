@@ -10,6 +10,19 @@ export type EndpointCandidate = {
   sampleFile: string;
 };
 
+export type ScannedProduct = {
+  id: string;
+  url: string;
+  text: string;
+  currentPriceCzk: number;
+  originalPriceCzk: number | null;
+  lowest30dCzk: number | null;
+  ratioToLow: number | null;
+  discountPct: number | null;
+  dealScore: number | null;
+  verdict: "NEW_LOW" | "TOP" | "GOOD" | "OK" | "EXPENSIVE" | "NO_HISTORY";
+};
+
 export type DiscoveryState = {
   running: boolean;
   runId: string | null;
@@ -23,6 +36,7 @@ export type DiscoveryState = {
   finishedAt: string | null;
   error: string | null;
   candidates: EndpointCandidate[];
+  products: ScannedProduct[];
 };
 
 const initialState: DiscoveryState = {
@@ -38,6 +52,7 @@ const initialState: DiscoveryState = {
   finishedAt: null,
   error: null,
   candidates: [],
+  products: [],
 };
 
 const globalState = globalThis as typeof globalThis & {
