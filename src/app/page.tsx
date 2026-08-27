@@ -27,6 +27,7 @@ type Intent = {
   maxPriceCzk: number | null;
   materials: string[];
   excludedMaterials: string[];
+  excludedTerms: string[];
   requiredTerms: string[];
   qualityPreferred: boolean;
   sort: "recommended" | "price" | "history" | "deal";
@@ -43,20 +44,22 @@ type SearchResponse = {
   query: string;
   intent: Intent;
   results: Result[];
+  nearMatches?: Result[];
   source: "postgres" | "memory" | "live-aboutyou" | "hybrid";
   scannedProducts: number;
   persistedProducts?: number;
   liveProducts?: number;
   liveBatches?: number;
   resultCount: number;
+  nearMatchCount?: number;
   warnings?: string[];
 };
 
 const EXAMPLES = [
   "černé tričko L do 1 500 Kč, bavlna, top deal",
+  "černé tričko L do 500 Kč, bez límečku",
   "kvalitní mikina do 2 tisíc bez polyesteru",
   "Nike bílé tenisky velikost 43",
-  "džíny W32 co nejblíž historickému minimu",
 ];
 
 const RECOMMENDATIONS: Record<Result["recommendation"], { label: string; className: string }> = {
@@ -98,6 +101,7 @@ function intentChips(intent: Intent | null) {
     intent.maxPriceCzk ? `do ${money(intent.maxPriceCzk)}` : null,
     ...intent.materials,
     ...intent.excludedMaterials.map((material) => `bez ${material}`),
+    ...intent.excludedTerms.map((term) => `bez ${term}`),
     ...intent.requiredTerms,
     intent.qualityPreferred ? "priorita kvalita" : null,
     intent.sort === "history" ? "řadit podle historie" : null,
@@ -143,6 +147,10 @@ export default function Home() {
   }
 
   const chips = intentChips(data?.intent ?? null);
+  const showingNearMatches = Boolean(
+    !loading && data && data.results.length === 0 && (data.nearMatches?.length ?? 0) > 0,
+  );
+  const displayResults = showingNearMatches ? (data?.nearMatches ?? []) : (data?.results ?? []);
 
   return (
     <main className="shoppingShell">
@@ -172,7 +180,7 @@ export default function Home() {
               id="shopping-query"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Např. černé tričko L do 1 500 Kč, ideálně bavlna"
+              placeholder="Např. černé tričko L do 500 Kč, bez límečku"
               autoComplete="off"
             />
             <button type="submit" disabled={loading}>
@@ -198,7 +206,7 @@ export default function Home() {
         </div>
         <div className="dataStatus">
           <strong>{data?.resultCount ?? 0}</strong>
-          <span>výsledků</span>
+          <span>přesných výsledků</span>
           <i />
           <strong>{data?.scannedProducts ?? 0}</strong>
           <span>unikátních kandidátů</span>
@@ -232,10 +240,19 @@ export default function Home() {
         </section>
       ) : null}
 
+      {showingNearMatches ? (
+        <section className="emptyResults">
+          <h2>Přesná shoda se nenašla — tady jsou nejbližší možnosti.</h2>
+          <p>
+            Nic neskrýváme: u každé karty níže píšeme, kterou podmínku je potřeba ověřit nebo o kolik je produkt nad rozpočtem.
+          </p>
+        </section>
+      ) : null}
+
       <section className="resultsGrid" aria-busy={loading}>
         {loading
           ? Array.from({ length: 8 }).map((_, index) => <article className="productCard skeleton" key={index} />)
-          : data?.results.map(({ product, recommendation, reasons }) => {
+          : displayResults.map(({ product, recommendation, reasons }) => {
               const badge = RECOMMENDATIONS[recommendation];
               return (
                 <article className="productCard" key={product.id}>
@@ -282,10 +299,10 @@ export default function Home() {
             })}
       </section>
 
-      {!loading && data && data.scannedProducts > 0 && data.results.length === 0 ? (
+      {!loading && data && data.scannedProducts > 0 && data.results.length === 0 && !showingNearMatches ? (
         <section className="emptyResults">
           <h2>Nic přesně neprošlo zadáním.</h2>
-          <p>Zkus ubrat jednu podmínku — třeba velikost nebo materiál. Jakmile získáme variant-level feed, velikosti budou výrazně přesnější.</p>
+          <p>Zkus ubrat jednu podmínku. Jakmile získáme variant-level feed a širší katalogový sync, pokrytí bude ještě výrazně lepší.</p>
         </section>
       ) : null}
 
