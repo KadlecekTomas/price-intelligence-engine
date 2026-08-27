@@ -37,7 +37,7 @@ const MATERIAL_STYLE_IDS: Record<string, string> = {
   "vlna": "35462",
 };
 
-type LiveBatchSpec = {
+export type LiveBatchSpec = {
   color: string | null;
   material: string | null;
   confidence: "exact" | "partial" | "broad";
@@ -81,7 +81,18 @@ export function aboutYouCategoryUrl(
   return url.toString();
 }
 
-function batchSpecs(intent: SearchIntent): LiveBatchSpec[] {
+function confidenceForBatch(intent: SearchIntent, color: string | null, material: string | null): LiveBatchSpec["confidence"] {
+  const wantsColor = Boolean(intent.color);
+  const wantsMaterial = intent.materials.length > 0;
+  const colorSatisfied = !wantsColor || color === intent.color;
+  const materialSatisfied = !wantsMaterial || (material !== null && intent.materials.includes(material));
+
+  if ((wantsColor || wantsMaterial) && colorSatisfied && materialSatisfied) return "exact";
+  if (color || material) return "partial";
+  return "broad";
+}
+
+export function aboutYouLiveBatchSpecs(intent: SearchIntent): LiveBatchSpec[] {
   const color = verifiedColor(intent.color);
   const material = verifiedMaterial(intent.materials);
   const specs: LiveBatchSpec[] = [];
@@ -89,16 +100,28 @@ function batchSpecs(intent: SearchIntent): LiveBatchSpec[] {
   specs.push({
     color,
     material,
-    confidence: color || material ? "exact" : "broad",
+    confidence: confidenceForBatch(intent, color, material),
   });
 
   if (color && material) {
-    specs.push({ color, material: null, confidence: "partial" });
-    specs.push({ color: null, material, confidence: "partial" });
+    specs.push({
+      color,
+      material: null,
+      confidence: confidenceForBatch(intent, color, null),
+    });
+    specs.push({
+      color: null,
+      material,
+      confidence: confidenceForBatch(intent, null, material),
+    });
   }
 
   if (color || material) {
-    specs.push({ color: null, material: null, confidence: "broad" });
+    specs.push({
+      color: null,
+      material: null,
+      confidence: confidenceForBatch(intent, null, null),
+    });
   }
 
   const seen = new Set<string>();
@@ -245,7 +268,7 @@ async function fetchBatch(intent: SearchIntent, spec: LiveBatchSpec) {
 }
 
 export async function fetchLiveAboutYouCatalog(intent: SearchIntent): Promise<LiveCatalogResult> {
-  const specs = batchSpecs(intent);
+  const specs = aboutYouLiveBatchSpecs(intent);
   const settled = await Promise.allSettled(specs.map((spec) => fetchBatch(intent, spec)));
   const successful = settled
     .filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof fetchBatch>>> => result.status === "fulfilled")
