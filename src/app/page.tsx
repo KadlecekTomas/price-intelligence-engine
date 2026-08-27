@@ -15,6 +15,11 @@ type Status = {
   startedAt: string | null;
   finishedAt: string | null;
   error: string | null;
+  capabilities: {
+    scanAvailable: boolean;
+    environment: "local" | "vercel";
+    persistence: string;
+  };
 };
 
 type Candidate = {
@@ -61,6 +66,11 @@ const emptyStatus: Status = {
   startedAt: null,
   finishedAt: null,
   error: null,
+  capabilities: {
+    scanAvailable: true,
+    environment: "local",
+    persistence: "memory-and-local-capture",
+  },
 };
 
 const verdictLabels: Record<Product["verdict"], string> = {
@@ -102,11 +112,15 @@ export default function Home() {
 
   useEffect(() => {
     void refresh();
+    if (!status.capabilities.scanAvailable) return;
+
     const timer = window.setInterval(() => void refresh(), 1000);
     return () => window.clearInterval(timer);
-  }, [refresh]);
+  }, [refresh, status.capabilities.scanAvailable]);
 
   async function startDiscovery() {
+    if (!status.capabilities.scanAvailable) return;
+
     setStarting(true);
     try {
       await fetch("/api/discovery/start", { method: "POST" });
@@ -116,6 +130,7 @@ export default function Home() {
     }
   }
 
+  const hosted = status.capabilities.environment === "vercel";
   const progress = status.totalSteps
     ? Math.min(100, Math.round((status.step / status.totalSteps) * 100))
     : 0;
@@ -129,7 +144,9 @@ export default function Home() {
     <main className="shell">
       <header className="hero">
         <div>
-          <p className="eyebrow">LOCAL • CZ MARKET • MULTI-SHOP READY</p>
+          <p className="eyebrow">
+            {hosted ? "VERCEL DASHBOARD • CZ MARKET • MULTI-SHOP READY" : "LOCAL SCANNER • CZ MARKET • MULTI-SHOP READY"}
+          </p>
           <h1>Price Intelligence Engine</h1>
           <p className="lede">
             Dnešní scan kombinuje cenu vůči 30dennímu minimu s cíleným enrichmentem materiálu u nejzajímavějších pánských kusů.
@@ -143,18 +160,29 @@ export default function Home() {
 
       <section className="panel controlPanel">
         <div>
-          <h2>Scan + shopping shortlist</h2>
+          <h2>{hosted ? "Hosted dashboard" : "Scan + shopping shortlist"}</h2>
           <p>
-            Chromium projde aktuální český storefront, najde dealy, u nejlepšího oblečení otevře jen omezený počet detailů kvůli materiálu a zároveň hledá bulk endpoint pro pozdější kompletní sync.
+            {hosted
+              ? "Dashboard je bezpečně nasazený na Vercelu. Playwright scan zůstává zatím lokální; po připojení databáze a workeru sem potečou perzistentní výsledky automaticky."
+              : "Chromium projde aktuální český storefront, najde dealy, u nejlepšího oblečení otevře omezený počet detailů kvůli materiálu a zároveň hledá bulk endpoint pro pozdější kompletní sync."}
           </p>
         </div>
-        <button onClick={startDiscovery} disabled={status.running || starting}>
-          {status.running ? "Scan běží…" : starting ? "Spouštím…" : "Spustit dnešní scan"}
+        <button
+          onClick={startDiscovery}
+          disabled={!status.capabilities.scanAvailable || status.running || starting}
+        >
+          {hosted
+            ? "Scan je zatím lokální"
+            : status.running
+              ? "Scan běží…"
+              : starting
+                ? "Spouštím…"
+                : "Spustit dnešní scan"}
         </button>
       </section>
 
       <section className="stats">
-        <article className="stat"><span>Fáze</span><strong>{status.phase}</strong></article>
+        <article className="stat"><span>Prostředí</span><strong>{hosted ? "Vercel" : "Lokální"}</strong></article>
         <article className="stat"><span>Product links</span><strong>{status.productLinks.toLocaleString("cs-CZ")}</strong></article>
         <article className="stat"><span>Materiál ověřen</span><strong>{status.enrichedProducts.toLocaleString("cs-CZ")}</strong></article>
         <article className="stat"><span>Endpoint kandidáti</span><strong>{status.candidateResponses.toLocaleString("cs-CZ")}</strong></article>
@@ -163,7 +191,11 @@ export default function Home() {
       <section className="panel progressPanel">
         <div className="progressTop"><span>Průchod katalogem</span><strong>{progress} %</strong></div>
         <div className="progressTrack"><div className="progressValue" style={{ width: `${progress}%` }} /></div>
-        <p className="muted">Run: {status.runId ?? "zatím žádný"}</p>
+        <p className="muted">
+          {hosted
+            ? "Perzistentní data připojíme přes DB + samostatný worker. Vercel zatím slouží jako bezpečný dashboard."
+            : `Run: ${status.runId ?? "zatím žádný"}`}
+        </p>
         {status.error ? <p className="error">{status.error}</p> : null}
       </section>
 
@@ -178,7 +210,11 @@ export default function Home() {
         </div>
 
         {shortlist.length === 0 ? (
-          <div className="empty">Po dokončení scanu se tu objeví oblečení s ověřeným materiálem.</div>
+          <div className="empty">
+            {hosted
+              ? "Hosted dashboard čeká na perzistentní data z workeru."
+              : "Po dokončení scanu se tu objeví oblečení s ověřeným materiálem."}
+          </div>
         ) : (
           <div className="tableWrap">
             <table>
@@ -226,7 +262,9 @@ export default function Home() {
         </div>
 
         {products.length === 0 ? (
-          <div className="empty">Spusť scan. Jakmile načteme produktové karty, objeví se tu první dnešní dealy.</div>
+          <div className="empty">
+            {hosted ? "Čekáme na DB/worker sync." : "Spusť scan. Jakmile načteme produktové karty, objeví se tu první dnešní dealy."}
+          </div>
         ) : (
           <div className="tableWrap">
             <table>
@@ -274,7 +312,9 @@ export default function Home() {
         </div>
 
         {candidates.length === 0 ? (
-          <div className="empty">Scan zároveň analyzuje síť. Tady se objeví zachycené JSON endpointy.</div>
+          <div className="empty">
+            {hosted ? "Endpoint discovery běží pouze v lokálním workeru." : "Scan zároveň analyzuje síť. Tady se objeví zachycené JSON endpointy."}
+          </div>
         ) : (
           <div className="tableWrap">
             <table>
