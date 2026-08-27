@@ -219,6 +219,7 @@ function recommendationFor(product: ScannedProduct): SearchResult["recommendatio
 
 export function searchProducts(products: ScannedProduct[], intent: SearchIntent, limit = 36): SearchResult[] {
   const results: SearchResult[] = [];
+  const normalizedSize = intent.size ? fold(intent.size) : null;
 
   for (const product of products) {
     const haystack = productHaystack(product);
@@ -227,7 +228,7 @@ export function searchProducts(products: ScannedProduct[], intent: SearchIntent,
     if (intent.colorTerms.length > 0 && !containsAlias(haystack, intent.colorTerms)) continue;
     if (intent.materials.length > 0 && !intent.materials.some((material) => containsAlias(haystack, materialAliases(material)))) continue;
     if (intent.excludedMaterials.some((material) => containsAlias(haystack, materialAliases(material)))) continue;
-    if (intent.size && !words(haystack).some((token) => token === fold(intent.size))) continue;
+    if (normalizedSize && !words(haystack).some((token) => token === normalizedSize)) continue;
     if (intent.requiredTerms.some((term) => !haystack.includes(term))) continue;
 
     let searchScore = product.buyScore ?? product.dealScore ?? 45;
