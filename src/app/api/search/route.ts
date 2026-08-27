@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { parseNaturalSearch, searchProducts } from "@/domain/natural-search";
 import { databaseConfigured, readLatestProducts } from "@/lib/database";
 import { discoveryState } from "@/lib/discovery-state";
+import { readPublicProducts } from "@/lib/supabase-read";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -16,14 +17,23 @@ export async function GET(request: Request) {
 
   const intent = parseNaturalSearch(query);
   let products = discoveryState.products;
-  let source: "postgres" | "memory" = "memory";
+  let source: "postgres" | "supabase" | "memory" = "memory";
 
   if (databaseConfigured()) {
     try {
       products = await readLatestProducts(500);
       source = "postgres";
     } catch (error) {
-      console.error("Search DB read failed, falling back to memory", error);
+      console.error("Search direct DB read failed", error);
+    }
+  }
+
+  if (source === "memory") {
+    try {
+      products = await readPublicProducts(500);
+      source = "supabase";
+    } catch (error) {
+      console.error("Search public Supabase read failed, falling back to memory", error);
     }
   }
 
