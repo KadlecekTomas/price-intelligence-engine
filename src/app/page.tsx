@@ -1,36 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-
-type Status = {
-  running: boolean;
-  runId: string | null;
-  phase: string;
-  step: number;
-  totalSteps: number;
-  productLinks: number;
-  jsonResponses: number;
-  candidateResponses: number;
-  enrichedProducts: number;
-  startedAt: string | null;
-  finishedAt: string | null;
-  error: string | null;
-  capabilities: {
-    scanAvailable: boolean;
-    environment: "local" | "vercel";
-    persistence: string;
-  };
-};
-
-type Candidate = {
-  id: string;
-  method: string;
-  url: string;
-  status: number;
-  bytes: number;
-  score: number;
-  sampleFile: string;
-};
+import { FormEvent, useCallback, useEffect, useState } from "react";
 
 type Product = {
   id: string;
@@ -39,314 +9,264 @@ type Product = {
   currentPriceCzk: number;
   originalPriceCzk: number | null;
   lowest30dCzk: number | null;
-  ratioToLow: number | null;
-  discountPct: number | null;
   dealScore: number | null;
-  verdict: "NEW_LOW" | "TOP" | "GOOD" | "OK" | "EXPENSIVE" | "NO_HISTORY";
-  enriched: boolean;
   material: string | null;
   fit: string | null;
   color: string | null;
-  itemNumber: string | null;
   materialScore: number | null;
   buyScore: number | null;
-  qualitySignals: string[];
   observedMinCzk?: number | null;
-  observedMaxCzk?: number | null;
   observationCount?: number;
-  ratioToObservedMin?: number | null;
   historyScore?: number | null;
 };
 
-const emptyStatus: Status = {
-  running: false,
-  runId: null,
-  phase: "idle",
-  step: 0,
-  totalSteps: 0,
-  productLinks: 0,
-  jsonResponses: 0,
-  candidateResponses: 0,
-  enrichedProducts: 0,
-  startedAt: null,
-  finishedAt: null,
-  error: null,
-  capabilities: {
-    scanAvailable: true,
-    environment: "local",
-    persistence: "memory-and-local-capture",
-  },
+type Intent = {
+  category: string | null;
+  color: string | null;
+  size: string | null;
+  maxPriceCzk: number | null;
+  materials: string[];
+  excludedMaterials: string[];
+  requiredTerms: string[];
+  qualityPreferred: boolean;
+  sort: "recommended" | "price" | "history" | "deal";
 };
 
-const verdictLabels: Record<Product["verdict"], string> = {
-  NEW_LOW: "NOVÉ MINIMUM",
-  TOP: "TOP",
-  GOOD: "DOBRÉ",
-  OK: "OK",
-  EXPENSIVE: "DRAŽŠÍ",
-  NO_HISTORY: "BEZ HISTORIE",
+type Result = {
+  product: Product;
+  searchScore: number;
+  recommendation: "BUY_NOW" | "GOOD" | "WAIT" | "FAKE_SALE" | "CHECK";
+  reasons: string[];
+};
+
+type SearchResponse = {
+  query: string;
+  intent: Intent;
+  results: Result[];
+  source: "postgres" | "memory";
+  scannedProducts: number;
+  resultCount: number;
+};
+
+const EXAMPLES = [
+  "černé tričko L do 1 500 Kč, bavlna, top deal",
+  "kvalitní mikina do 2 tisíc bez polyesteru",
+  "Nike bílé tenisky velikost 43",
+  "džíny W32 co nejblíž historickému minimu",
+];
+
+const RECOMMENDATIONS: Record<Result["recommendation"], { label: string; className: string }> = {
+  BUY_NOW: { label: "KUP TEĎ", className: "buyNow" },
+  GOOD: { label: "DOBRÁ CENA", className: "good" },
+  WAIT: { label: "POČKEJ", className: "wait" },
+  FAKE_SALE: { label: "FALEŠNÁ SLEVA", className: "fake" },
+  CHECK: { label: "PROVĚŘIT", className: "check" },
 };
 
 function money(value: number | null | undefined) {
   return value == null ? "—" : `${value.toLocaleString("cs-CZ")} Kč`;
 }
 
+function productName(text: string) {
+  return text
+    .replace(/\s+/g, " ")
+    .replace(/\s+(?:Původně:|Poslední nejnižší cena:).*$/i, "")
+    .replace(/\s+[0-9][0-9\s.]*\s*Kč.*$/i, "")
+    .trim()
+    .slice(0, 125) || "Produkt";
+}
+
+function intentChips(intent: Intent | null) {
+  if (!intent) return [];
+  return [
+    intent.category,
+    intent.color,
+    intent.size ? `velikost ${intent.size}` : null,
+    intent.maxPriceCzk ? `do ${money(intent.maxPriceCzk)}` : null,
+    ...intent.materials,
+    ...intent.excludedMaterials.map((material) => `bez ${material}`),
+    ...intent.requiredTerms,
+    intent.qualityPreferred ? "priorita kvalita" : null,
+    intent.sort === "history" ? "řadit podle historie" : null,
+    intent.sort === "price" ? "nejlevnější" : null,
+    intent.sort === "deal" ? "nejlepší deal" : null,
+  ].filter((item): item is string => Boolean(item));
+}
+
 export default function Home() {
-  const [status, setStatus] = useState<Status>(emptyStatus);
-  const [candidates, setCandidates] = useState<Candidate[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [starting, setStarting] = useState(false);
+  const [query, setQuery] = useState("");
+  const [data, setData] = useState<SearchResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
-    const [statusResponse, candidatesResponse, productsResponse] = await Promise.all([
-      fetch("/api/discovery/status", { cache: "no-store" }),
-      fetch("/api/candidates", { cache: "no-store" }),
-      fetch("/api/products", { cache: "no-store" }),
-    ]);
-
-    if (statusResponse.ok) setStatus(await statusResponse.json());
-    if (candidatesResponse.ok) {
-      const payload = await candidatesResponse.json();
-      setCandidates(payload.candidates ?? []);
-    }
-    if (productsResponse.ok) {
-      const payload = await productsResponse.json();
-      setProducts(payload.products ?? []);
+  const search = useCallback(async (nextQuery: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/search?q=${encodeURIComponent(nextQuery)}&limit=36`, {
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error(`Vyhledávání selhalo (${response.status})`);
+      setData(await response.json());
+    } catch (searchError) {
+      setError(searchError instanceof Error ? searchError.message : "Vyhledávání selhalo");
+    } finally {
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void refresh();
-    if (!status.capabilities.scanAvailable) return;
+    void search("");
+  }, [search]);
 
-    const timer = window.setInterval(() => void refresh(), 1000);
-    return () => window.clearInterval(timer);
-  }, [refresh, status.capabilities.scanAvailable]);
-
-  async function startDiscovery() {
-    if (!status.capabilities.scanAvailable) return;
-
-    setStarting(true);
-    try {
-      await fetch("/api/discovery/start", { method: "POST" });
-      await refresh();
-    } finally {
-      setStarting(false);
-    }
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void search(query.trim());
   }
 
-  const hosted = status.capabilities.environment === "vercel";
-  const progress = status.totalSteps
-    ? Math.min(100, Math.round((status.step / status.totalSteps) * 100))
-    : 0;
+  function useExample(example: string) {
+    setQuery(example);
+    void search(example);
+  }
 
-  const enriched = products.filter((product) => product.enriched && product.material);
-  const shortlist = [...enriched]
-    .sort((a, b) => (b.buyScore ?? -1) - (a.buyScore ?? -1))
-    .slice(0, 24);
+  const chips = intentChips(data?.intent ?? null);
 
   return (
-    <main className="shell">
-      <header className="hero">
-        <div>
-          <p className="eyebrow">
-            {hosted ? "VERCEL DASHBOARD • CZ MARKET • MULTI-SHOP READY" : "LOCAL SCANNER • CZ MARKET • MULTI-SHOP READY"}
-          </p>
-          <h1>Price Intelligence Engine</h1>
-          <p className="lede">
-            Dnešní scan kombinuje 30denní minimum e-shopu, naši vlastní cenovou historii a materiálový signál přizpůsobený typu oblečení.
+    <main className="shoppingShell">
+      <header className="shoppingHero">
+        <nav className="topbar">
+          <div className="brandMark">PI</div>
+          <div className="brandCopy">
+            <strong>Price Intelligence</strong>
+            <span>CZ fashion deals</span>
+          </div>
+          <div className="shopStatus"><span /> ABOUT YOU CZ · první zdroj</div>
+        </nav>
+
+        <div className="heroCopy">
+          <p className="eyebrow">CENA × HISTORIE × MATERIÁL</p>
+          <h1>Napiš, co chceš koupit.</h1>
+          <p>
+            Nehledáme největší procento slevy. Hledáme kusy, které dávají smysl vůči
+            aktuální ceně, 30dennímu minimu, naší vlastní historii a materiálu.
           </p>
         </div>
-        <div className="adapterBadge">
-          <span className="dot" />
-          ABOUT YOU CZ · Muži
-        </div>
+
+        <form className="searchBox" onSubmit={submit}>
+          <label htmlFor="shopping-query">Co dnes hledáš?</label>
+          <div className="searchRow">
+            <input
+              id="shopping-query"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Např. černé tričko L do 1 500 Kč, ideálně bavlna"
+              autoComplete="off"
+            />
+            <button type="submit" disabled={loading}>
+              {loading ? "Hledám…" : "Najít nejlepší"}
+            </button>
+          </div>
+          <div className="examples">
+            {EXAMPLES.map((example) => (
+              <button key={example} type="button" onClick={() => useExample(example)}>
+                {example}
+              </button>
+            ))}
+          </div>
+        </form>
       </header>
 
-      <section className="panel controlPanel">
+      <section className="searchMeta">
         <div>
-          <h2>{hosted ? "Hosted dashboard" : "Scan + shopping shortlist"}</h2>
+          <span className="metaLabel">Rozumím tomu jako</span>
+          <div className="intentChips">
+            {chips.length > 0 ? chips.map((chip) => <span key={chip}>{chip}</span>) : <span>nejlepší aktuální dealy</span>}
+          </div>
+        </div>
+        <div className="dataStatus">
+          <strong>{data?.resultCount ?? 0}</strong>
+          <span>výsledků</span>
+          <i />
+          <strong>{data?.scannedProducts ?? 0}</strong>
+          <span>produktů v aktuálním datasetu</span>
+          <i />
+          <span>{data?.source === "postgres" ? "Supabase" : "lokální data"}</span>
+        </div>
+      </section>
+
+      {error ? <div className="searchError">{error}</div> : null}
+
+      {!loading && data?.scannedProducts === 0 ? (
+        <section className="emptyCatalog">
+          <p className="eyebrow">DATASET JE ZATÍM PRÁZDNÝ</p>
+          <h2>Webové vyhledávání je připravené.</h2>
           <p>
-            {hosted
-              ? "Dashboard je bezpečně nasazený na Vercelu. Playwright scan zůstává lokální; jakmile je nastavený DATABASE_URL, čte dashboard stejné perzistentní snapshoty jako worker."
-              : "Chromium projde aktuální český storefront, najde dealy, u nejlepšího oblečení ověří materiál a zároveň hledá bulk endpoint pro pozdější kompletní sync."}
+            Jakmile do Supabase dorazí první katalogový scan, výsledky se tady objeví bez
+            další změny frontendu. Crawler je interní datový worker; nákup už probíhá pouze přes tento web.
           </p>
-        </div>
-        <button
-          onClick={startDiscovery}
-          disabled={!status.capabilities.scanAvailable || status.running || starting}
-        >
-          {hosted
-            ? "Scan je zatím lokální"
-            : status.running
-              ? "Scan běží…"
-              : starting
-                ? "Spouštím…"
-                : "Spustit dnešní scan"}
-        </button>
+        </section>
+      ) : null}
+
+      <section className="resultsGrid" aria-busy={loading}>
+        {loading
+          ? Array.from({ length: 8 }).map((_, index) => <article className="productCard skeleton" key={index} />)
+          : data?.results.map(({ product, recommendation, reasons }) => {
+              const badge = RECOMMENDATIONS[recommendation];
+              return (
+                <article className="productCard" key={product.id}>
+                  <div className="cardTop">
+                    <span className={`recommendation ${badge.className}`}>{badge.label}</span>
+                    <span className="shopName">ABOUT YOU</span>
+                  </div>
+
+                  <h2>{productName(product.text)}</h2>
+                  <div className="productDetails">
+                    {product.color ? <span>{product.color}</span> : null}
+                    {product.material ? <span>{product.material}</span> : null}
+                    {product.fit ? <span>{product.fit}</span> : null}
+                  </div>
+
+                  <div className="priceBlock">
+                    <strong>{money(product.currentPriceCzk)}</strong>
+                    {product.originalPriceCzk && product.originalPriceCzk > product.currentPriceCzk ? (
+                      <del>{money(product.originalPriceCzk)}</del>
+                    ) : null}
+                  </div>
+
+                  <div className="metrics">
+                    <div><span>30d minimum</span><strong>{money(product.lowest30dCzk)}</strong></div>
+                    <div><span>Naše minimum</span><strong>{money(product.observedMinCzk)}</strong></div>
+                    <div><span>Buy score</span><strong>{product.buyScore == null ? "—" : Math.round(product.buyScore)}</strong></div>
+                    <div><span>Historie</span><strong>{product.historyScore == null ? "—" : Math.round(product.historyScore)}</strong></div>
+                  </div>
+
+                  {reasons.length > 0 ? (
+                    <ul className="reasons">
+                      {reasons.map((reason) => <li key={reason}>{reason}</li>)}
+                    </ul>
+                  ) : (
+                    <p className="noReason">Máme zatím málo vlastních pozorování — ber jako kandidáta k prověření.</p>
+                  )}
+
+                  <div className="cardFooter">
+                    <span>{product.observationCount ? `${product.observationCount}× naše pozorování` : "první pozorování"}</span>
+                    <a href={product.url} target="_blank" rel="noreferrer">Otevřít v obchodě ↗</a>
+                  </div>
+                </article>
+              );
+            })}
       </section>
 
-      <section className="stats">
-        <article className="stat"><span>Prostředí</span><strong>{hosted ? "Vercel" : "Lokální"}</strong></article>
-        <article className="stat"><span>Product links</span><strong>{status.productLinks.toLocaleString("cs-CZ")}</strong></article>
-        <article className="stat"><span>Materiál ověřen</span><strong>{status.enrichedProducts.toLocaleString("cs-CZ")}</strong></article>
-        <article className="stat"><span>Endpoint kandidáti</span><strong>{status.candidateResponses.toLocaleString("cs-CZ")}</strong></article>
-      </section>
+      {!loading && data && data.scannedProducts > 0 && data.results.length === 0 ? (
+        <section className="emptyResults">
+          <h2>Nic přesně neprošlo zadáním.</h2>
+          <p>Zkus ubrat jednu podmínku — třeba velikost nebo materiál. Jakmile získáme variant-level feed, velikosti budou výrazně přesnější.</p>
+        </section>
+      ) : null}
 
-      <section className="panel progressPanel">
-        <div className="progressTop"><span>Průchod katalogem</span><strong>{progress} %</strong></div>
-        <div className="progressTrack"><div className="progressValue" style={{ width: `${progress}%` }} /></div>
-        <p className="muted">
-          {hosted
-            ? `Persistence: ${status.capabilities.persistence}`
-            : `Run: ${status.runId ?? "zatím žádný"}`}
-        </p>
-        {status.error ? <p className="error">{status.error}</p> : null}
-      </section>
-
-      <section className="panel">
-        <div className="sectionHeading">
-          <div>
-            <h2>Shortlist: cena + historie + materiál</h2>
-            <p>
-              Materiálový scoring už rozlišuje trička, úplety, denim, outerwear a sport. Naše historické minimum se počítá výhradně z vlastních uložených snapshotů.
-            </p>
-          </div>
-        </div>
-
-        {shortlist.length === 0 ? (
-          <div className="empty">
-            {hosted
-              ? "Hosted dashboard čeká na první perzistentní scan z workeru."
-              : "Po dokončení scanu se tu objeví oblečení s ověřeným materiálem."}
-          </div>
-        ) : (
-          <div className="tableWrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Buy</th>
-                  <th>Deal</th>
-                  <th>Historie</th>
-                  <th>Materiál</th>
-                  <th>Teď</th>
-                  <th>30d min</th>
-                  <th>Naše min</th>
-                  <th>Obs.</th>
-                  <th>Produkt</th>
-                </tr>
-              </thead>
-              <tbody>
-                {shortlist.map((product) => (
-                  <tr key={product.id}>
-                    <td><span className="score">{product.buyScore ?? "—"}</span></td>
-                    <td>{product.dealScore === null ? "—" : Math.round(product.dealScore)}</td>
-                    <td>{product.historyScore == null ? "—" : Math.round(product.historyScore)}</td>
-                    <td title={product.qualitySignals.join(", ") || undefined}>
-                      {product.material ?? "—"}
-                    </td>
-                    <td>{money(product.currentPriceCzk)}</td>
-                    <td>{money(product.lowest30dCzk)}</td>
-                    <td>{money(product.observedMinCzk)}</td>
-                    <td>{product.observationCount ?? "—"}</td>
-                    <td className="urlCell">
-                      <a href={product.url} target="_blank" rel="noreferrer" title={product.text}>
-                        {product.text}
-                      </a>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      <section className="panel">
-        <div className="sectionHeading">
-          <div>
-            <h2>Všechny nalezené cenové dealy</h2>
-            <p>
-              30d minimum pochází z e-shopu. „Naše min“ vzniká až z opakovaných vlastních scanů a je proto dlouhodobě důležitější signál.
-            </p>
-          </div>
-        </div>
-
-        {products.length === 0 ? (
-          <div className="empty">
-            {hosted ? "Čekáme na první DB/worker sync." : "Spusť scan. Jakmile načteme produktové karty, objeví se tu první dnešní dealy."}
-          </div>
-        ) : (
-          <div className="tableWrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Verdikt</th>
-                  <th>Deal</th>
-                  <th>Historie</th>
-                  <th>Teď</th>
-                  <th>30d min</th>
-                  <th>Naše min</th>
-                  <th>Obs.</th>
-                  <th>Produkt</th>
-                </tr>
-              </thead>
-              <tbody>
-                {products.slice(0, 50).map((product) => (
-                  <tr key={product.id}>
-                    <td><span className="score">{verdictLabels[product.verdict]}</span></td>
-                    <td>{product.dealScore === null ? "—" : Math.round(product.dealScore)}</td>
-                    <td>{product.historyScore == null ? "—" : Math.round(product.historyScore)}</td>
-                    <td>{money(product.currentPriceCzk)}</td>
-                    <td>{money(product.lowest30dCzk)}</td>
-                    <td>{money(product.observedMinCzk)}</td>
-                    <td>{product.observationCount ?? "—"}</td>
-                    <td className="urlCell">
-                      <a href={product.url} target="_blank" rel="noreferrer" title={product.text}>
-                        {product.text}
-                      </a>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      <section className="panel">
-        <div className="sectionHeading">
-          <div>
-            <h2>Endpoint discovery</h2>
-            <p>Vyšší score = větší šance, že response obsahuje produkty, ceny, varianty nebo pagination.</p>
-          </div>
-        </div>
-
-        {candidates.length === 0 ? (
-          <div className="empty">
-            {hosted ? "Endpoint discovery běží pouze v lokálním workeru." : "Scan zároveň analyzuje síť. Tady se objeví zachycené JSON endpointy."}
-          </div>
-        ) : (
-          <div className="tableWrap">
-            <table>
-              <thead><tr><th>Score</th><th>HTTP</th><th>Velikost</th><th>Endpoint</th></tr></thead>
-              <tbody>
-                {candidates.slice(0, 30).map((candidate) => (
-                  <tr key={candidate.id}>
-                    <td><span className="score">{candidate.score}</span></td>
-                    <td>{candidate.method} · {candidate.status}</td>
-                    <td>{Math.round(candidate.bytes / 1024).toLocaleString("cs-CZ")} KB</td>
-                    <td className="urlCell" title={candidate.url}>{candidate.url}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      <footer>
-        Core engine zůstává shop-agnostic. ABOUT YOU CZ je první adapter; další obchod nebude vyžadovat přepis scoringu ani UI.
+      <footer className="shoppingFooter">
+        <strong>Price Intelligence Engine</strong>
+        <span>ABOUT YOU je první adapter. Datový model je připravený pro další české e-shopy.</span>
       </footer>
     </main>
   );
