@@ -67,10 +67,7 @@ export function textMatchesRequestedSize(text: string, requestedSize: string) {
     return compactText.includes(target) || compactText.includes(target.replace("/L", "X"));
   }
 
-  if (/^(?:XXXL|XXL|XL|XXS|XS|L|M|S)$/.test(target)) {
-    const tokens = normalizedText.split(/[^A-Z0-9]+/).filter(Boolean);
-    return tokens.includes(target);
-  }
-
+  // For letter and numeric sizes, do not infer availability from arbitrary tokens.
+  // Brand names such as LEVI'S / H&M can otherwise become false S/M matches.
   return false;
 }
