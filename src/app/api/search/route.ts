@@ -17,7 +17,7 @@ export async function GET(request: Request) {
 
   const intent = parseNaturalSearch(query);
   let products = discoveryState.products;
-  let source: "postgres" | "supabase" | "memory" = "memory";
+  let source: "postgres" | "memory" = "memory";
 
   if (databaseConfigured()) {
     try {
@@ -31,7 +31,7 @@ export async function GET(request: Request) {
   if (source === "memory") {
     try {
       products = await readPublicProducts(500);
-      source = "supabase";
+      source = "postgres";
     } catch (error) {
       console.error("Search public Supabase read failed, falling back to memory", error);
     }
