@@ -19,7 +19,7 @@ const HTML = `
       </article>
       <article data-card="2">
         <a href="https://www.aboutyou.cz/p/levis/tricko-perfect-4848562">
-          <span>LEVI'S ® Tričko Perfect</span>
+          <span>LEVI'S ®</span><span>Tričko Perfect</span>
         </a>
         <div>519 Kč</div>
         <div>Dostupné velikosti: XS, S, M, L</div>
@@ -38,12 +38,28 @@ test("maps category and verified color to current ABOUT YOU CZ URL", () => {
   );
 });
 
+test("maps verified material together with color", () => {
+  const intent = parseNaturalSearch("černé tričko L do 1500, bavlna");
+  assert.equal(
+    aboutYouCategoryUrl(intent),
+    "https://www.aboutyou.cz/c/muzi/obleceni/tricka-20324?color=38932&materialStyle=35459",
+  );
+  assert.equal(
+    aboutYouCategoryUrl(intent, { color: "černá", material: null }),
+    "https://www.aboutyou.cz/c/muzi/obleceni/tricka-20324?color=38932",
+  );
+  assert.equal(
+    aboutYouCategoryUrl(intent, { color: null, material: "bavlna" }),
+    "https://www.aboutyou.cz/c/muzi/obleceni/tricka-20324?materialStyle=35459",
+  );
+});
+
 test("falls back to the men root category", () => {
   const intent = parseNaturalSearch("ukaž nejlepší věci");
   assert.equal(aboutYouCategoryUrl(intent), "https://www.aboutyou.cz/c/muzi-20202");
 });
 
-test("parses SSR product cards and canonicalizes product URLs", () => {
+test("parses SSR product cards, preserves word boundaries and canonicalizes URLs", () => {
   const products = parseAboutYouCategoryHtml(
     HTML,
     "https://www.aboutyou.cz/c/muzi/obleceni/tricka-20324",
@@ -56,16 +72,31 @@ test("parses SSR product cards and canonicalizes product URLs", () => {
   assert.equal(tommy.originalPriceCzk, 999);
   assert.equal(tommy.lowest30dCzk, 345);
   assert.equal(tommy.url.includes("tracking"), false);
+  assert.equal(tommy.text.includes("TOMMY HILFIGER Tričko 'BRAND LOVE'"), true);
   assert.equal(tommy.text.includes("Dostupné velikosti: S, M, L, XL"), true);
+
+  const levis = products.find((product) => product.url.includes("tricko-perfect"));
+  assert.ok(levis);
+  assert.equal(levis.text.includes("LEVI'S ® Tričko Perfect"), true);
 });
 
-test("annotates color when the source category is color-filtered", () => {
+test("annotates constraints when the source category is filtered", () => {
   const products = parseAboutYouCategoryHtml(
     HTML,
-    "https://www.aboutyou.cz/c/muzi/obleceni/tricka-20324?color=38932",
+    "https://www.aboutyou.cz/c/muzi/obleceni/tricka-20324?color=38932&materialStyle=35459",
     "černá",
+    "bavlna",
+    "exact",
   );
   assert.equal(products.every((product) => product.color === "černá"), true);
+  assert.equal(
+    products.every((product) => product.qualitySignals.includes("ABOUT YOU filtr: materiál=bavlna")),
+    true,
+  );
+  assert.equal(
+    products.every((product) => product.qualitySignals.includes("ABOUT YOU live: exact")),
+    true,
+  );
 });
 
 test("does not confuse multiple products in a broad parent container", () => {

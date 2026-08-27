@@ -22,13 +22,36 @@ function sizeAvailability(product: ScannedProduct, requestedSize: string) {
   return "unknown";
 }
 
-function downgradeForUnverifiedConstraint(result: SearchResult, reason: string): SearchResult {
-  if (result.reasons.includes(reason)) return result;
+function downgradeForUnverifiedConstraint(
+  result: SearchResult,
+  reason: string,
+  penalty = 7,
+): SearchResult {
+  const reasons = result.reasons.includes(reason)
+    ? result.reasons
+    : [reason, ...result.reasons].slice(0, 3);
+
   return {
     ...result,
+    searchScore: result.searchScore - penalty,
     recommendation: "CHECK",
-    reasons: [reason, ...result.reasons].slice(0, 3),
+    reasons,
   };
+}
+
+function productConfirmsMaterial(product: ScannedProduct, requestedMaterials: string[]) {
+  if (requestedMaterials.length === 0) return true;
+  const haystack = fold([
+    product.material,
+    ...product.qualitySignals,
+  ].filter(Boolean).join(" "));
+  return requestedMaterials.some((material) => haystack.includes(fold(material)));
+}
+
+function liveConfidenceBonus(product: ScannedProduct) {
+  if (product.qualitySignals.includes("ABOUT YOU live: exact")) return 6;
+  if (product.qualitySignals.includes("ABOUT YOU live: partial")) return 2;
+  return 0;
 }
 
 function dedupeResults(results: SearchResult[], limit: number) {
@@ -78,50 +101,74 @@ export async function GET(request: Request) {
   let results = persistedResults;
   let source: "postgres" | "memory" | "live-aboutyou" | "hybrid" = persistedSource;
   let liveSourceUrl: string | null = null;
+  let liveSourceUrls: string[] = [];
   let liveFetchedAt: string | null = null;
   let liveProducts = 0;
+  let liveBatches = 0;
   const warnings: string[] = [];
 
   if (persistedResults.length < desiredPersistedResults) {
     try {
       const live = await fetchLiveAboutYouCatalog(intent);
       liveSourceUrl = live.sourceUrl;
+      liveSourceUrls = live.sourceUrls;
       liveFetchedAt = live.fetchedAt;
       liveProducts = live.products.length;
+      liveBatches = live.batchCount;
 
+      // The live adapter already narrows the public category by verified ABOUT YOU filters.
+      // Search the union more permissively so partial/broad batches can fill the shortlist,
+      // then explicitly mark any unverified constraint instead of pretending it is known.
       const liveIntent = {
         ...intent,
+        color: null,
+        colorTerms: [],
         size: null,
+        materials: [],
         excludedMaterials: [],
-        materials: live.appliedMaterial ? intent.materials : [],
       };
 
-      let liveResults = searchProducts(live.products, liveIntent, Math.max(limit, 48));
+      let liveResults = searchProducts(live.products, liveIntent, 100).map((result) => ({
+        ...result,
+        searchScore: result.searchScore + liveConfidenceBonus(result.product),
+      }));
 
       if (intent.size) {
-        liveResults = liveResults.filter((result) => {
-          const availability = sizeAvailability(result.product, intent.size!);
-          return availability !== "no";
-        }).map((result) => {
-          const availability = sizeAvailability(result.product, intent.size!);
-          return availability === "unknown"
-            ? downgradeForUnverifiedConstraint(result, `velikost ${intent.size} ověř na detailu`)
-            : result;
-        });
+        liveResults = liveResults
+          .filter((result) => sizeAvailability(result.product, intent.size!) !== "no")
+          .map((result) => {
+            const availability = sizeAvailability(result.product, intent.size!);
+            return availability === "unknown"
+              ? downgradeForUnverifiedConstraint(result, `velikost ${intent.size} ověř na detailu`, 4)
+              : result;
+          });
       }
 
-      if (intent.materials.length > 0 && !live.appliedMaterial) {
-        warnings.push("Požadovaný materiál není na veřejné kategorii spolehlivě filtrovatelný; u živých výsledků ho ověřujeme až po detailním syncu.");
+      if (intent.color) {
         liveResults = liveResults.map((result) =>
-          downgradeForUnverifiedConstraint(result, "materiál zatím není ověřený"),
+          result.product.color === intent.color
+            ? result
+            : downgradeForUnverifiedConstraint(result, `barvu ${intent.color} ověř na detailu`, 9),
+        );
+      }
+
+      if (intent.materials.length > 0) {
+        liveResults = liveResults.map((result) =>
+          productConfirmsMaterial(result.product, intent.materials)
+            ? result
+            : downgradeForUnverifiedConstraint(result, "materiál ověř na detailu", 9),
         );
       }
 
       if (intent.excludedMaterials.length > 0) {
-        warnings.push("Vyloučený materiál nelze z produktové karty garantovat; živé kandidáty proto označujeme k prověření.");
+        warnings.push("Vyloučený materiál nelze z veřejné produktové karty garantovat; živé kandidáty proto označujeme k prověření.");
         liveResults = liveResults.map((result) =>
-          downgradeForUnverifiedConstraint(result, "složení materiálu ověř na detailu"),
+          downgradeForUnverifiedConstraint(result, "složení materiálu ověř na detailu", 8),
         );
+      }
+
+      if (live.batchCount > 1) {
+        warnings.push(`Pro větší pokrytí jsme spojili ${live.batchCount} veřejné výřezy stejné ABOUT YOU kategorie; přesné shody řadíme před kandidáty k ověření.`);
       }
 
       results = dedupeResults([...persistedResults, ...liveResults], limit);
@@ -142,8 +189,10 @@ export async function GET(request: Request) {
     scannedProducts: persistedProducts.length + liveProducts,
     persistedProducts: persistedProducts.length,
     liveProducts,
+    liveBatches,
     resultCount: results.length,
     liveSourceUrl,
+    liveSourceUrls,
     liveFetchedAt,
     warnings,
   });

@@ -37,33 +37,93 @@ const MATERIAL_STYLE_IDS: Record<string, string> = {
   "vlna": "35462",
 };
 
+type LiveBatchSpec = {
+  color: string | null;
+  material: string | null;
+  confidence: "exact" | "partial" | "broad";
+};
+
 export type LiveCatalogResult = {
   sourceUrl: string;
+  sourceUrls: string[];
   products: ScannedProduct[];
   fetchedAt: string;
-  appliedColor: string | null;
-  appliedMaterial: string | null;
+  batchCount: number;
 };
+
+function verifiedColor(value: string | null) {
+  return value && COLOR_IDS[value] ? value : null;
+}
+
+function verifiedMaterial(values: string[]) {
+  return values.find((material) => MATERIAL_STYLE_IDS[material]) ?? null;
+}
+
+function categoryPath(category: string | null) {
+  return category ? CATEGORY_URLS[category] ?? "/c/muzi-20202" : "/c/muzi-20202";
+}
 
 export function aboutYouCategoryUrl(
   intent: Pick<SearchIntent, "category" | "color" | "materials">,
+  overrides?: { color?: string | null; material?: string | null },
 ) {
-  const pathname = intent.category ? CATEGORY_URLS[intent.category] : null;
-  const url = new URL(pathname ?? "/c/muzi-20202", BASE_URL);
+  const url = new URL(categoryPath(intent.category), BASE_URL);
+  const color = overrides && "color" in overrides
+    ? verifiedColor(overrides.color ?? null)
+    : verifiedColor(intent.color);
+  const material = overrides && "material" in overrides
+    ? overrides.material && MATERIAL_STYLE_IDS[overrides.material] ? overrides.material : null
+    : verifiedMaterial(intent.materials);
 
-  const colorId = intent.color ? COLOR_IDS[intent.color] : null;
-  if (colorId) url.searchParams.set("color", colorId);
-
-  const verifiedMaterial = intent.materials.find((material) => MATERIAL_STYLE_IDS[material]);
-  if (verifiedMaterial) {
-    url.searchParams.set("materialStyle", MATERIAL_STYLE_IDS[verifiedMaterial]);
-  }
+  if (color) url.searchParams.set("color", COLOR_IDS[color]);
+  if (material) url.searchParams.set("materialStyle", MATERIAL_STYLE_IDS[material]);
 
   return url.toString();
 }
 
+function batchSpecs(intent: SearchIntent): LiveBatchSpec[] {
+  const color = verifiedColor(intent.color);
+  const material = verifiedMaterial(intent.materials);
+  const specs: LiveBatchSpec[] = [];
+
+  specs.push({
+    color,
+    material,
+    confidence: color || material ? "exact" : "broad",
+  });
+
+  if (color && material) {
+    specs.push({ color, material: null, confidence: "partial" });
+    specs.push({ color: null, material, confidence: "partial" });
+  }
+
+  if (color || material) {
+    specs.push({ color: null, material: null, confidence: "broad" });
+  }
+
+  const seen = new Set<string>();
+  return specs.filter((spec) => {
+    const key = `${spec.color ?? "*"}|${spec.material ?? "*"}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function normalize(value: string) {
   return value.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function readableText(
+  $: cheerio.CheerioAPI,
+  node: Parameters<cheerio.CheerioAPI>[0],
+) {
+  const clone = $(node).clone();
+  clone.find("br").replaceWith(" ");
+  clone.find("*").each((_, child) => {
+    $(child).after(" ");
+  });
+  return normalize(clone.text());
 }
 
 function canonicalProductUrl(href: string, sourceUrl: string) {
@@ -78,11 +138,21 @@ function canonicalProductUrl(href: string, sourceUrl: string) {
   }
 }
 
+function constraintStrength(product: ScannedProduct) {
+  let strength = 0;
+  if (product.color) strength += 2;
+  if (product.qualitySignals.some((signal) => signal.startsWith("ABOUT YOU filtr: materiál="))) strength += 2;
+  if (product.qualitySignals.includes("ABOUT YOU live: exact")) strength += 2;
+  if (product.qualitySignals.includes("ABOUT YOU live: partial")) strength += 1;
+  return strength;
+}
+
 export function parseAboutYouCategoryHtml(
   html: string,
   sourceUrl: string,
   knownColor: string | null = null,
   knownMaterialFilter: string | null = null,
+  confidence: LiveBatchSpec["confidence"] = "exact",
 ) {
   const $ = cheerio.load(html);
   const products = new Map<string, ScannedProduct>();
@@ -92,14 +162,14 @@ export function parseAboutYouCategoryHtml(
     if (!href) return;
 
     const url = canonicalProductUrl(href, sourceUrl);
-    if (!url || products.has(url)) return;
+    if (!url) return;
 
     let current = $(element);
     let firstPriceText: string | null = null;
     let preferredText: string | null = null;
 
     for (let depth = 0; depth < 8 && current.length > 0; depth += 1) {
-      const candidate = normalize(current.text());
+      const candidate = readableText($, current.get(0)!);
       const productLinkCount = current.find('a[href*="/p/"]').length;
 
       if (
@@ -118,35 +188,39 @@ export function parseAboutYouCategoryHtml(
       current = current.parent();
     }
 
-    const rawText = preferredText ?? firstPriceText ?? normalize($(element).text());
+    const rawText = preferredText ?? firstPriceText ?? readableText($, element);
     const product = parseAboutYouCard(url, rawText);
-    if (product) {
-      if (knownColor) product.color = knownColor;
-      if (knownMaterialFilter) {
-        product.qualitySignals.push(`ABOUT YOU filtr: ${knownMaterialFilter}`);
-      }
+    if (!product) return;
+
+    if (knownColor) product.color = knownColor;
+    if (knownMaterialFilter) {
+      product.qualitySignals.push(`ABOUT YOU filtr: materiál=${knownMaterialFilter}`);
+    }
+    product.qualitySignals.push(`ABOUT YOU live: ${confidence}`);
+
+    const existing = products.get(url);
+    if (!existing || constraintStrength(product) > constraintStrength(existing)) {
       products.set(url, product);
     }
   });
 
   return [...products.values()]
     .sort((a, b) => (b.dealScore ?? -1) - (a.dealScore ?? -1) || a.currentPriceCzk - b.currentPriceCzk)
-    .slice(0, 160);
+    .slice(0, 180);
 }
 
-export async function fetchLiveAboutYouCatalog(intent: SearchIntent): Promise<LiveCatalogResult> {
-  const sourceUrl = aboutYouCategoryUrl(intent);
-  const appliedColor = intent.color && COLOR_IDS[intent.color] ? intent.color : null;
-  const appliedMaterial =
-    intent.materials.find((material) => MATERIAL_STYLE_IDS[material]) ?? null;
-
+async function fetchBatch(intent: SearchIntent, spec: LiveBatchSpec) {
+  const sourceUrl = aboutYouCategoryUrl(intent, {
+    color: spec.color,
+    material: spec.material,
+  });
   const response = await fetch(sourceUrl, {
     headers: {
       Accept: "text/html,application/xhtml+xml",
       "Accept-Language": "cs-CZ,cs;q=0.9,en;q=0.6",
     },
     next: { revalidate: 300 },
-    signal: AbortSignal.timeout(12_000),
+    signal: AbortSignal.timeout(10_000),
   });
 
   if (!response.ok) {
@@ -160,9 +234,49 @@ export async function fetchLiveAboutYouCatalog(intent: SearchIntent): Promise<Li
 
   return {
     sourceUrl,
-    products: parseAboutYouCategoryHtml(html, sourceUrl, appliedColor, appliedMaterial),
+    products: parseAboutYouCategoryHtml(
+      html,
+      sourceUrl,
+      spec.color,
+      spec.material,
+      spec.confidence,
+    ),
+  };
+}
+
+export async function fetchLiveAboutYouCatalog(intent: SearchIntent): Promise<LiveCatalogResult> {
+  const specs = batchSpecs(intent);
+  const settled = await Promise.allSettled(specs.map((spec) => fetchBatch(intent, spec)));
+  const successful = settled
+    .filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof fetchBatch>>> => result.status === "fulfilled")
+    .map((result) => result.value);
+
+  if (successful.length === 0) {
+    const firstFailure = settled.find((result) => result.status === "rejected");
+    throw firstFailure && firstFailure.status === "rejected"
+      ? firstFailure.reason
+      : new Error("ABOUT YOU live read failed");
+  }
+
+  const products = new Map<string, ScannedProduct>();
+  for (const batch of successful) {
+    for (const product of batch.products) {
+      const existing = products.get(product.id);
+      if (
+        !existing ||
+        constraintStrength(product) > constraintStrength(existing) ||
+        (constraintStrength(product) === constraintStrength(existing) && product.text.length > existing.text.length)
+      ) {
+        products.set(product.id, product);
+      }
+    }
+  }
+
+  return {
+    sourceUrl: successful[0].sourceUrl,
+    sourceUrls: successful.map((batch) => batch.sourceUrl),
+    products: [...products.values()],
     fetchedAt: new Date().toISOString(),
-    appliedColor,
-    appliedMaterial,
+    batchCount: successful.length,
   };
 }

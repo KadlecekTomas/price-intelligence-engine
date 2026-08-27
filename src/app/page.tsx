@@ -43,9 +43,13 @@ type SearchResponse = {
   query: string;
   intent: Intent;
   results: Result[];
-  source: "postgres" | "memory";
+  source: "postgres" | "memory" | "live-aboutyou" | "hybrid";
   scannedProducts: number;
+  persistedProducts?: number;
+  liveProducts?: number;
+  liveBatches?: number;
   resultCount: number;
+  warnings?: string[];
 };
 
 const EXAMPLES = [
@@ -72,8 +76,17 @@ function productName(text: string) {
     .replace(/\s+/g, " ")
     .replace(/\s+(?:Původně:|Poslední nejnižší cena:).*$/i, "")
     .replace(/\s+[0-9][0-9\s.]*\s*Kč.*$/i, "")
+    .replace(/^(?:(?:DEAL|VÝPRODEJ|OSOBNÍ KUPÓN|NOVÉ|EXKLUZIVNĚ|PRÉMIUM)\s+)+/i, "")
     .trim()
     .slice(0, 125) || "Produkt";
+}
+
+function sourceLabel(data: SearchResponse | null) {
+  if (!data) return "načítám";
+  if (data.source === "live-aboutyou") return "ABOUT YOU live";
+  if (data.source === "hybrid") return "Supabase + ABOUT YOU live";
+  if (data.source === "postgres") return "Supabase";
+  return "lokální data";
 }
 
 function intentChips(intent: Intent | null) {
@@ -188,21 +201,33 @@ export default function Home() {
           <span>výsledků</span>
           <i />
           <strong>{data?.scannedProducts ?? 0}</strong>
-          <span>produktů v aktuálním datasetu</span>
+          <span>unikátních kandidátů</span>
+          {data?.liveBatches ? (
+            <>
+              <i />
+              <strong>{data.liveBatches}</strong>
+              <span>live výřezy</span>
+            </>
+          ) : null}
           <i />
-          <span>{data?.source === "postgres" ? "Supabase" : "lokální data"}</span>
+          <span>{sourceLabel(data)}</span>
         </div>
       </section>
 
       {error ? <div className="searchError">{error}</div> : null}
 
+      {!loading && data?.warnings && data.warnings.length > 0 ? (
+        <section className="searchWarnings">
+          {data.warnings.map((warning) => <p key={warning}>{warning}</p>)}
+        </section>
+      ) : null}
+
       {!loading && data?.scannedProducts === 0 ? (
         <section className="emptyCatalog">
-          <p className="eyebrow">DATASET JE ZATÍM PRÁZDNÝ</p>
-          <h2>Webové vyhledávání je připravené.</h2>
+          <p className="eyebrow">LIVE DATA NEJSOU DOSTUPNÁ</p>
+          <h2>Vyhledávání teď nemá z čeho vybírat.</h2>
           <p>
-            Jakmile do Supabase dorazí první katalogový scan, výsledky se tady objeví bez
-            další změny frontendu. Crawler je interní datový worker; nákup už probíhá pouze přes tento web.
+            Zkus dotaz znovu za chvíli. Jakmile máme uložený katalog v Supabase, web ho kombinuje s čerstvým ABOUT YOU live výřezem.
           </p>
         </section>
       ) : null}
@@ -249,7 +274,7 @@ export default function Home() {
                   )}
 
                   <div className="cardFooter">
-                    <span>{product.observationCount ? `${product.observationCount}× naše pozorování` : "první pozorování"}</span>
+                    <span>{product.observationCount ? `${product.observationCount}× naše pozorování` : "live kandidát"}</span>
                     <a href={product.url} target="_blank" rel="noreferrer">Otevřít v obchodě ↗</a>
                   </div>
                 </article>
