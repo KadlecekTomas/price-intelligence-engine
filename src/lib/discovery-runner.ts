@@ -3,6 +3,7 @@ import path from "node:path";
 import { chromium } from "playwright";
 import type { BrowserContext, Page, Response } from "playwright";
 import { aboutYouCzMen } from "@/adapters/aboutyou-cz";
+import { scoreMaterialQuality } from "@/domain/material-quality";
 import {
   discoveryState,
   type EndpointCandidate,
@@ -201,7 +202,7 @@ async function enrichShortlist(context: BrowserContext) {
         const color = lineField(bodyText, "Barva");
         const itemNumber =
           bodyText.match(/Položka č\.\s*([A-Za-z0-9_-]+)/i)?.[1]?.trim() || null;
-        const materialResult = materialHeuristic(material);
+        const materialResult = scoreMaterialQuality(product.text, material);
 
         product.enriched = true;
         product.material = material;
