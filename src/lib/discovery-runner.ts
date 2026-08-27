@@ -3,7 +3,11 @@ import path from "node:path";
 import { chromium } from "playwright";
 import type { Response } from "playwright";
 import { aboutYouCzMen } from "@/adapters/aboutyou-cz";
-import { discoveryState, type EndpointCandidate } from "@/lib/discovery-state";
+import {
+  discoveryState,
+  type EndpointCandidate,
+  type ScannedProduct,
+} from "@/lib/discovery-state";
 
 const TOTAL_STEPS = 45;
 const SCROLL_DELAY_MS = 900;
@@ -18,6 +22,69 @@ function candidateScore(url: string, body: string) {
   if (/price|currency|sale|lowest/i.test(body)) score += 3;
   if (/product/i.test(body)) score += 2;
   return score;
+}
+
+function parseCzk(value: string | undefined) {
+  if (!value) return null;
+  const parsed = Number(value.replace(/[^0-9]/g, ""));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function verdictFromRatio(ratio: number | null): ScannedProduct["verdict"] {
+  if (ratio === null) return "NO_HISTORY";
+  if (ratio <= 1) return "NEW_LOW";
+  if (ratio <= 1.05) return "TOP";
+  if (ratio <= 1.15) return "GOOD";
+  if (ratio <= 1.3) return "OK";
+  return "EXPENSIVE";
+}
+
+function parseProduct(url: string, rawText: string): ScannedProduct | null {
+  const text = rawText.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+  const priceMatches = [...text.matchAll(/([0-9][0-9\s.]*)\s*Kč/g)];
+  const currentPriceCzk = parseCzk(priceMatches[0]?.[1]);
+  if (!currentPriceCzk) return null;
+
+  const originalPriceCzk = parseCzk(
+    text.match(/Původně:\s*([0-9][0-9\s.]*)\s*Kč/i)?.[1],
+  );
+  const lowest30dCzk = parseCzk(
+    text.match(/Poslední nejnižší cena:\s*([0-9][0-9\s.]*)\s*Kč/i)?.[1],
+  );
+
+  const ratioToLow = lowest30dCzk ? currentPriceCzk / lowest30dCzk : null;
+  const discountPct = originalPriceCzk
+    ? Math.max(0, 1 - currentPriceCzk / originalPriceCzk)
+    : null;
+  const dealScore =
+    ratioToLow === null
+      ? null
+      : Math.max(0, Math.min(100, 100 - (ratioToLow - 1) * 80));
+
+  return {
+    id: url,
+    url,
+    text,
+    currentPriceCzk,
+    originalPriceCzk,
+    lowest30dCzk,
+    ratioToLow,
+    discountPct,
+    dealScore,
+    verdict: verdictFromRatio(ratioToLow),
+  };
+}
+
+function refreshProducts(productLinks: Map<string, string>) {
+  discoveryState.products = [...productLinks.entries()]
+    .map(([url, text]) => parseProduct(url, text))
+    .filter((product): product is ScannedProduct => product !== null)
+    .sort((a, b) => {
+      const aScore = a.dealScore ?? -1;
+      const bScore = b.dealScore ?? -1;
+      return bScore - aScore || a.currentPriceCzk - b.currentPriceCzk;
+    })
+    .slice(0, 2_000);
 }
 
 async function inspectResponse(response: Response, captureDir: string) {
@@ -81,6 +148,7 @@ export async function runAboutYouDiscovery() {
     finishedAt: null,
     error: null,
     candidates: [],
+    products: [],
   });
 
   let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
@@ -139,6 +207,8 @@ export async function runAboutYouDiscovery() {
       }
 
       discoveryState.productLinks = productLinks.size;
+      if (step === 1 || step % 3 === 0) refreshProducts(productLinks);
+
       unchangedSteps = productLinks.size === previousCount ? unchangedSteps + 1 : 0;
       previousCount = productLinks.size;
 
@@ -150,6 +220,7 @@ export async function runAboutYouDiscovery() {
 
     discoveryState.phase = "saving-capture";
     await page.waitForTimeout(1_200);
+    refreshProducts(productLinks);
 
     await fs.writeFile(
       path.join(captureDir, "product-links.json"),
@@ -158,6 +229,11 @@ export async function runAboutYouDiscovery() {
         null,
         2,
       ),
+    );
+
+    await fs.writeFile(
+      path.join(captureDir, "products.json"),
+      JSON.stringify(discoveryState.products, null, 2),
     );
 
     await fs.writeFile(
@@ -174,6 +250,7 @@ export async function runAboutYouDiscovery() {
           market: aboutYouCzMen.market,
           startUrl: aboutYouCzMen.discovery.startUrl,
           productLinks: discoveryState.productLinks,
+          parsedProducts: discoveryState.products.length,
           jsonResponses: discoveryState.jsonResponses,
           candidateResponses: discoveryState.candidateResponses,
           finishedAt: new Date().toISOString(),
