@@ -7,6 +7,7 @@ import {
   type SearchIntent,
   type SearchResult,
 } from "@/domain/natural-search";
+import { sizeAvailabilityFromText } from "@/domain/size-availability";
 import { databaseConfigured, readLatestProducts } from "@/lib/database";
 import { discoveryState, type ScannedProduct } from "@/lib/discovery-state";
 import { readPublicProducts } from "@/lib/supabase-read";
@@ -15,17 +16,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 function sizeAvailability(product: ScannedProduct, requestedSize: string) {
-  const text = fold(product.text);
-  const target = fold(requestedSize);
-  const explicit = text.match(/dostupne velikosti:\s*(.*?)(?:pridat do kosiku|puvodne:|posledni nejnizsi cena:|$)/i)?.[1];
-
-  if (explicit) {
-    const sizes = explicit.split(/[,;/ ]+/).map((value) => value.trim()).filter(Boolean);
-    return sizes.includes(target) ? "yes" : "no";
-  }
-
-  if (/dostupne v mnoha velikostech/.test(text)) return "unknown";
-  return "unknown";
+  return sizeAvailabilityFromText(product.text, requestedSize);
 }
 
 function downgradeForUnverifiedConstraint(
@@ -104,8 +95,16 @@ function buildNearMatches(
         reasons.push(`velikost ${intent.size} ověř na detailu`);
       }
 
-      if (intent.color && result.product.color !== intent.color) {
-        reasons.push(`barvu ${intent.color} ověř na detailu`);
+      if (intent.color) {
+        if (result.product.color && result.product.color !== intent.color) {
+          reasons.push(`barva je ${result.product.color}, hledáš ${intent.color}`);
+        } else if (!result.product.color) {
+          reasons.push(`barvu ${intent.color} ověř na detailu`);
+        }
+      }
+
+      if (intent.materials.length > 0 && !productConfirmsMaterial(result.product, intent.materials)) {
+        reasons.push(`materiál ${intent.materials.join(" / ")} ověř na detailu`);
       }
 
       if (intent.excludedTerms.length > 0) {
@@ -176,6 +175,7 @@ export async function GET(request: Request) {
   let liveFetchedAt: string | null = null;
   let liveProducts = 0;
   let liveBatches = 0;
+  let liveProductIds: string[] = [];
   const warnings: string[] = [];
 
   if (persistedResults.length < desiredPersistedResults) {
@@ -185,6 +185,7 @@ export async function GET(request: Request) {
       liveSourceUrls = live.sourceUrls;
       liveFetchedAt = live.fetchedAt;
       liveProducts = live.products.length;
+      liveProductIds = live.products.map((product) => product.id);
       liveBatches = live.batchCount;
 
       // The live adapter already narrows the public category by verified ABOUT YOU filters.
@@ -250,7 +251,7 @@ export async function GET(request: Request) {
       }
 
       if (live.batchCount > 1) {
-        warnings.push(`Pro větší pokrytí jsme spojili ${live.batchCount} veřejné výřezy stejné ABOUT YOU kategorie; přesné shody řadíme před kandidáty k ověření.`);
+        warnings.push(`Pro větší pokrytí jsme spojili ${live.batchCount} veřejné výřezy stejné ABOUT YOU kategorie; přesnější výřezy dostávají vyšší skóre a neověřené podmínky vždy označujeme.`);
       }
 
       results = dedupeResults([...persistedResults, ...liveResults], limit);
@@ -266,13 +267,18 @@ export async function GET(request: Request) {
     }
   }
 
+  const uniqueCandidateCount = new Set([
+    ...persistedProducts.map((product) => product.id),
+    ...liveProductIds,
+  ]).size;
+
   return NextResponse.json({
     query,
     intent,
     results,
     nearMatches,
     source,
-    scannedProducts: persistedProducts.length + liveProducts,
+    scannedProducts: uniqueCandidateCount,
     persistedProducts: persistedProducts.length,
     liveProducts,
     liveBatches,
