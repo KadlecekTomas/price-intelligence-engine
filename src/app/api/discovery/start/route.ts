@@ -10,7 +10,7 @@ export async function POST() {
         ok: false,
         reason: "local-only",
         message:
-          "Playwright discovery runs locally. The hosted Vercel dashboard will consume persisted data once the worker/database layer is connected.",
+          "Playwright discovery runs locally. The hosted Vercel dashboard consumes persisted PostgreSQL data when DATABASE_URL is configured.",
       },
       { status: 409 },
     );
@@ -21,6 +21,30 @@ export async function POST() {
   }
 
   const { runAboutYouDiscovery } = await import("@/lib/discovery-runner");
-  void runAboutYouDiscovery();
+
+  void runAboutYouDiscovery()
+    .then(async () => {
+      const { databaseConfigured, persistScanProducts } = await import("@/lib/database");
+      if (
+        !databaseConfigured() ||
+        !discoveryState.runId ||
+        !discoveryState.startedAt ||
+        discoveryState.products.length === 0
+      ) {
+        return;
+      }
+
+      await persistScanProducts({
+        runId: discoveryState.runId,
+        shopId: "aboutyou-cz",
+        market: "CZ",
+        startedAt: discoveryState.startedAt,
+        products: discoveryState.products,
+      });
+    })
+    .catch((error) => {
+      console.error("Discovery persistence failed", error);
+    });
+
   return NextResponse.json({ ok: true }, { status: 202 });
 }
