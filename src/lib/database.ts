@@ -83,6 +83,8 @@ async function ensureSchema() {
       `;
 
       await sql`CREATE INDEX IF NOT EXISTS idx_products_shop_market ON products(shop_id, market)`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_scan_runs_shop_market_finished ON scan_runs(shop_id, market, finished_at DESC) WHERE finished_at IS NOT NULL`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_snapshots_scan_run ON price_snapshots(scan_run_id)`;
       await sql`CREATE INDEX IF NOT EXISTS idx_snapshots_product_time ON price_snapshots(product_id, captured_at DESC)`;
       await sql`CREATE INDEX IF NOT EXISTS idx_snapshots_buy_score ON price_snapshots(buy_score DESC NULLS LAST)`;
     })().catch((error) => {
@@ -219,7 +221,11 @@ export async function persistScanProducts(input: PersistScanInput) {
   });
 }
 
-export async function readLatestProducts(limit = 200): Promise<ScannedProduct[]> {
+export async function readLatestProducts(
+  limit = 200,
+  shopId = "aboutyou-cz",
+  market = "CZ",
+): Promise<ScannedProduct[]> {
   if (!databaseConfigured()) return [];
 
   await ensureSchema();
@@ -248,52 +254,70 @@ export async function readLatestProducts(limit = 200): Promise<ScannedProduct[]>
       observation_count: number;
     }>
   >`
-    WITH latest AS (
-      SELECT DISTINCT ON (product_id)
-        product_id,
-        current_price_czk,
-        original_price_czk,
-        lowest_30d_czk,
-        deal_score,
-        material_score,
-        buy_score,
-        verdict,
-        captured_at
-      FROM price_snapshots
-      ORDER BY product_id, captured_at DESC
+    WITH latest_run AS (
+      SELECT id
+      FROM scan_runs
+      WHERE
+        shop_id = ${shopId}
+        AND market = ${market}
+        AND finished_at IS NOT NULL
+        AND product_count > 0
+      ORDER BY finished_at DESC
+      LIMIT 1
+    ), current_scan AS (
+      SELECT
+        snapshots.product_id,
+        snapshots.current_price_czk,
+        snapshots.original_price_czk,
+        snapshots.lowest_30d_czk,
+        snapshots.deal_score,
+        snapshots.material_score,
+        snapshots.buy_score,
+        snapshots.verdict,
+        snapshots.captured_at
+      FROM price_snapshots snapshots
+      JOIN latest_run ON latest_run.id = snapshots.scan_run_id
     ), history AS (
       SELECT
-        product_id,
-        MIN(current_price_czk)::INTEGER AS observed_min_czk,
-        MAX(current_price_czk)::INTEGER AS observed_max_czk,
+        snapshots.product_id,
+        MIN(snapshots.current_price_czk)::INTEGER AS observed_min_czk,
+        MAX(snapshots.current_price_czk)::INTEGER AS observed_max_czk,
         COUNT(*)::INTEGER AS observation_count
-      FROM price_snapshots
-      GROUP BY product_id
+      FROM price_snapshots snapshots
+      JOIN products history_product ON history_product.id = snapshots.product_id
+      WHERE
+        history_product.shop_id = ${shopId}
+        AND history_product.market = ${market}
+      GROUP BY snapshots.product_id
     )
     SELECT
-      p.external_key,
-      p.url,
-      p.raw_text,
-      p.item_number,
-      p.material,
-      p.fit,
-      p.color,
-      p.quality_signals,
-      latest.current_price_czk,
-      latest.original_price_czk,
-      latest.lowest_30d_czk,
-      latest.deal_score,
-      latest.material_score,
-      latest.buy_score,
-      latest.verdict,
+      product.external_key,
+      product.url,
+      product.raw_text,
+      product.item_number,
+      product.material,
+      product.fit,
+      product.color,
+      product.quality_signals,
+      current_scan.current_price_czk,
+      current_scan.original_price_czk,
+      current_scan.lowest_30d_czk,
+      current_scan.deal_score,
+      current_scan.material_score,
+      current_scan.buy_score,
+      current_scan.verdict,
       history.observed_min_czk,
       history.observed_max_czk,
       history.observation_count
-    FROM latest
-    JOIN history ON history.product_id = latest.product_id
-    JOIN products p ON p.id = latest.product_id
-    WHERE p.market = 'CZ'
-    ORDER BY COALESCE(latest.buy_score, latest.deal_score, -1) DESC, latest.current_price_czk ASC
+    FROM current_scan
+    JOIN history ON history.product_id = current_scan.product_id
+    JOIN products product ON product.id = current_scan.product_id
+    WHERE
+      product.shop_id = ${shopId}
+      AND product.market = ${market}
+    ORDER BY
+      COALESCE(current_scan.buy_score, current_scan.deal_score, -1) DESC,
+      current_scan.current_price_czk ASC
     LIMIT ${safeLimit}
   `;
 
