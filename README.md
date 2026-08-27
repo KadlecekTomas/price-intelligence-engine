@@ -21,6 +21,7 @@ Marketingová sleva není totéž jako dobrá cena. Engine ukládá cenové snap
 - historický score až od druhého vlastního snapshotu,
 - cílený PDP enrichment materiálu, střihu a barvy u nejlepšího shortlistu,
 - materiálový scoring podle typu oděvu: trička, úplety, denim, outerwear a sportswear,
+- nákupní CLI filtry pro cenu, score, text, velikost a počet výsledků,
 - lokální capture do `data/runs/`,
 - volitelný zápis do PostgreSQL přes `DATABASE_URL`,
 - Vercel-safe hosted dashboard, který Playwright nespouští serverless,
@@ -45,6 +46,31 @@ npm run scan
 - uloží `products.json`, `candidates.json` a další capture soubory do `data/runs/<runId>/`,
 - vytvoří `data/runs/<runId>/shopping-report.md`,
 - pokud je nastavený `DATABASE_URL`, uloží scan do PostgreSQL a report načte i naše historické minimum a počet pozorování.
+
+### Nákupní filtry
+
+```bash
+npm run scan -- --max-price=2000 --contains=tričko --min-buy=70 --limit=15
+```
+
+Podporované filtry:
+
+```text
+--max-price=2000      maximální cena v Kč
+--min-buy=70          minimální Buy score
+--min-history=80      minimální vlastní history score
+--contains=tričko     hledání v produktu, materiálu, střihu a signálech
+--size=L              best-effort velikost z textu produktové karty
+--limit=20            počet výsledků, 1–100
+```
+
+`--size` je zatím pouze best-effort. Spolehlivou velikost + stock zapneme až po nalezení variant-level/bulk endpointu.
+
+Nápověda:
+
+```bash
+npm run scan -- --help
+```
 
 Pro dashboard místo CLI:
 
@@ -108,7 +134,7 @@ ABOUT YOU CZ / další shop
 src/
   adapters/        # shop-specific discovery / mapping
   cli/             # one-command lokální workflow
-  domain/          # společný datový model + deal/material scoring
+  domain/          # společný datový model + deal/material/filter scoring
   lib/             # discovery + persistence
   app/             # dashboard + API
 supabase/migrations/
