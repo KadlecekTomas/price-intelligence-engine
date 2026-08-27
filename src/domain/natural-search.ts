@@ -12,6 +12,7 @@ export type SearchIntent = {
   maxPriceCzk: number | null;
   materials: string[];
   excludedMaterials: string[];
+  excludedTerms: string[];
   requiredTerms: string[];
   qualityPreferred: boolean;
   sort: SearchSort;
@@ -62,6 +63,18 @@ const MATERIALS: Array<[string, string[]]> = [
   ["modal", ["modal"]],
 ];
 
+const NEGATIVE_FEATURES: Array<[string, string[]]> = [
+  ["límeček", ["limecek", "limecku", "limeckem", "limec", "collar", "polotricko", "polokosile"]],
+  ["logo", ["logo", "loga", "logem", "branding"]],
+  ["potisk", ["potisk", "potisku", "potiskem", "print", "graphic"]],
+  ["kapuce", ["kapuce", "kapuci", "hood"]],
+  ["zip", ["zip", "zipem", "zipper"]],
+];
+
+const NEGATION_FILLERS = new Set([
+  "velkeho", "velkyho", "vyrazneho", "viditelneho", "maleho", "jakehokoli", "jakehokoliv",
+]);
+
 const STOP_WORDS = new Set([
   "chci", "hledam", "najdi", "najit", "ukaz", "ukazat", "mi", "pro", "idealne",
   "nejlepe", "spis", "klidne", "nejaky", "nejake", "nejakou", "panske", "pansky",
@@ -98,6 +111,10 @@ function containsAlias(text: string, aliases: string[]) {
 
 function materialAliases(name: string) {
   return MATERIALS.find(([material]) => material === name)?.[1] ?? [name];
+}
+
+function negativeFeatureAliases(name: string) {
+  return NEGATIVE_FEATURES.find(([feature]) => feature === name)?.[1] ?? [name];
 }
 
 function parsePrice(text: string) {
@@ -140,6 +157,47 @@ function isExcludedMaterial(text: string, aliases: string[]) {
   return false;
 }
 
+function canonicalNegativeFeature(token: string) {
+  return NEGATIVE_FEATURES.find(([, aliases]) =>
+    aliases.some((alias) => tokenMatchesAlias(token, alias)),
+  )?.[0] ?? token;
+}
+
+function tokenIsMaterial(token: string) {
+  return MATERIALS.some(([, aliases]) => aliases.some((alias) => tokenMatchesAlias(token, alias)));
+}
+
+function parseExcludedTerms(text: string) {
+  const tokens = words(text);
+  const excludedTerms: string[] = [];
+  const negatedTokens = new Set<string>();
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (tokens[index] !== "bez") continue;
+
+    for (let offset = 1; offset <= 3; offset += 1) {
+      const token = tokens[index + offset];
+      if (!token) break;
+      if (NEGATION_FILLERS.has(token)) {
+        negatedTokens.add(token);
+        continue;
+      }
+      if (STOP_WORDS.has(token)) break;
+
+      negatedTokens.add(token);
+      if (!tokenIsMaterial(token)) {
+        excludedTerms.push(canonicalNegativeFeature(token));
+      }
+      break;
+    }
+  }
+
+  return {
+    excludedTerms: [...new Set(excludedTerms)].slice(0, 5),
+    negatedTokens,
+  };
+}
+
 function isConsumedTerm(term: string) {
   const aliases = [...CATEGORIES, ...COLORS, ...MATERIALS].flatMap(([, values]) => values);
   return aliases.some((alias) => tokenMatchesAlias(term, alias));
@@ -157,6 +215,7 @@ export function parseNaturalSearch(raw: string): SearchIntent {
     (isExcludedMaterial(text, aliases) ? excludedMaterials : materials).push(name);
   }
 
+  const { excludedTerms, negatedTokens } = parseExcludedTerms(text);
   const maxPriceCzk = parsePrice(text);
   const size = parseSize(raw);
   const qualityPreferred = /kvalit|material|prijemn|vydrz|premium/.test(text);
@@ -171,6 +230,7 @@ export function parseNaturalSearch(raw: string): SearchIntent {
   const requiredTerms = words(text)
     .filter((term) => term.length >= 3)
     .filter((term) => !STOP_WORDS.has(term))
+    .filter((term) => !negatedTokens.has(term))
     .filter((term) => !isConsumedTerm(term))
     .filter((term) => !/^\d+$/.test(term))
     .filter((term) => !/^(xxxl|xxl|xl|xs|l|m|s|w\d+|l\d+)$/.test(term));
@@ -185,6 +245,7 @@ export function parseNaturalSearch(raw: string): SearchIntent {
     maxPriceCzk,
     materials,
     excludedMaterials,
+    excludedTerms,
     requiredTerms: [...new Set(requiredTerms)].slice(0, 5),
     qualityPreferred,
     sort,
@@ -228,6 +289,7 @@ export function searchProducts(products: ScannedProduct[], intent: SearchIntent,
     if (intent.colorTerms.length > 0 && !containsAlias(haystack, intent.colorTerms)) continue;
     if (intent.materials.length > 0 && !intent.materials.some((material) => containsAlias(haystack, materialAliases(material)))) continue;
     if (intent.excludedMaterials.some((material) => containsAlias(haystack, materialAliases(material)))) continue;
+    if (intent.excludedTerms.some((term) => containsAlias(haystack, negativeFeatureAliases(term)))) continue;
     if (normalizedSize && !words(haystack).some((token) => token === normalizedSize)) continue;
     if (intent.requiredTerms.some((term) => !haystack.includes(term))) continue;
 
