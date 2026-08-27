@@ -81,6 +81,26 @@ test("keeps half shoe sizes and supports XXS", () => {
   assert.equal(parseNaturalSearch("tričko XXS").size, "XXS");
 });
 
+test("persisted search matches half shoe and combined jeans sizes", () => {
+  const shoes = searchProducts([
+    product({
+      id: "shoes",
+      text: "Nike bílé tenisky Dostupné velikosti: 42, 43, 43,5, 44 Původně: 2 499 Kč",
+      color: "bílá",
+    }),
+  ], parseNaturalSearch("Nike bílé tenisky velikost 43,5"));
+  assert.equal(shoes[0]?.product.id, "shoes");
+
+  const jeans = searchProducts([
+    product({
+      id: "jeans",
+      text: "Levi's džíny Dostupné velikosti: W30/L30, W32/L30, W32/L32 Původně: 1 999 Kč",
+      color: null,
+    }),
+  ], parseNaturalSearch("džíny W32/L30"));
+  assert.equal(jeans[0]?.product.id, "jeans");
+});
+
 test("supports common no-logo and no-print phrases", () => {
   const noLogo = parseNaturalSearch("černá mikina bez velkého loga");
   const noPrint = parseNaturalSearch("tričko bez potisku");
