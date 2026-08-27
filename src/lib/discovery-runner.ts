@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright";
-import type { Response } from "playwright";
+import type { BrowserContext, Page, Response } from "playwright";
 import { aboutYouCzMen } from "@/adapters/aboutyou-cz";
 import {
   discoveryState,
@@ -12,6 +12,11 @@ import {
 const TOTAL_STEPS = 45;
 const SCROLL_DELAY_MS = 900;
 const MAX_JSON_BYTES = 4_000_000;
+const ENRICH_LIMIT = 24;
+const ENRICH_DELAY_MS = 450;
+
+const CLOTHING_PATTERN =
+  /(tričko|košile|svetr|mikina|kalhoty|džíny|bunda|kabát|sako|blejzr|kraťasy|šortky|polo|rolák)/i;
 
 function candidateScore(url: string, body: string) {
   let score = 0;
@@ -72,19 +77,156 @@ function parseProduct(url: string, rawText: string): ScannedProduct | null {
     discountPct,
     dealScore,
     verdict: verdictFromRatio(ratioToLow),
+    enriched: false,
+    material: null,
+    fit: null,
+    color: null,
+    itemNumber: null,
+    materialScore: null,
+    buyScore: dealScore,
+    qualitySignals: [],
   };
 }
 
 function refreshProducts(productLinks: Map<string, string>) {
+  const existing = new Map(discoveryState.products.map((product) => [product.url, product]));
+
   discoveryState.products = [...productLinks.entries()]
-    .map(([url, text]) => parseProduct(url, text))
+    .map(([url, text]) => {
+      const parsed = parseProduct(url, text);
+      const previous = existing.get(url);
+      if (!parsed || !previous?.enriched) return parsed;
+      return {
+        ...parsed,
+        enriched: previous.enriched,
+        material: previous.material,
+        fit: previous.fit,
+        color: previous.color,
+        itemNumber: previous.itemNumber,
+        materialScore: previous.materialScore,
+        buyScore: previous.buyScore,
+        qualitySignals: previous.qualitySignals,
+      };
+    })
     .filter((product): product is ScannedProduct => product !== null)
     .sort((a, b) => {
-      const aScore = a.dealScore ?? -1;
-      const bScore = b.dealScore ?? -1;
+      const aScore = a.buyScore ?? a.dealScore ?? -1;
+      const bScore = b.buyScore ?? b.dealScore ?? -1;
       return bScore - aScore || a.currentPriceCzk - b.currentPriceCzk;
     })
     .slice(0, 2_000);
+}
+
+function lineField(bodyText: string, label: string) {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = bodyText.match(new RegExp(`${escaped}:\\s*([^\\n]+)`, "i"));
+  return match?.[1]?.trim() || null;
+}
+
+function materialHeuristic(material: string | null) {
+  if (!material) return { score: null, signals: [] as string[] };
+
+  const value = material.toLocaleLowerCase("cs-CZ");
+  let score = 55;
+  const signals: string[] = [];
+
+  const reward = (pattern: RegExp, points: number, signal: string) => {
+    if (pattern.test(value)) {
+      score += points;
+      signals.push(signal);
+    }
+  };
+
+  reward(/kašmír|cashmere/, 30, "kašmír");
+  reward(/merino/, 27, "merino");
+  reward(/vlna|wool/, 22, "vlna");
+  reward(/len|linen/, 22, "len");
+  reward(/lyocell|tencel/, 15, "lyocell/Tencel");
+  reward(/modal/, 12, "modal");
+  reward(/kůže|leather/, 18, "kůže");
+  reward(/100\s*%\s*bavlna|100\s*%\s*cotton/, 20, "100% bavlna");
+
+  if (/100\s*%\s*polyester/.test(value)) {
+    score -= 25;
+    signals.push("100% polyester");
+  } else if (/polyester/.test(value)) {
+    score -= 8;
+    signals.push("obsahuje polyester");
+  }
+
+  if (/akryl|acrylic/.test(value)) {
+    score -= 12;
+    signals.push("obsahuje akryl");
+  }
+
+  return { score: Math.max(0, Math.min(100, score)), signals };
+}
+
+function buyScore(dealScore: number | null, materialScore: number | null) {
+  if (dealScore === null && materialScore === null) return null;
+  if (dealScore === null) return materialScore;
+  if (materialScore === null) return dealScore;
+  return Math.round(dealScore * 0.68 + materialScore * 0.32);
+}
+
+async function enrichShortlist(context: BrowserContext) {
+  const shortlist = discoveryState.products
+    .filter(
+      (product) =>
+        CLOTHING_PATTERN.test(product.text) &&
+        (product.dealScore ?? 0) >= 65 &&
+        !product.enriched,
+    )
+    .slice(0, ENRICH_LIMIT);
+
+  if (shortlist.length === 0) return;
+
+  discoveryState.phase = "enriching-materials";
+  discoveryState.enrichedProducts = 0;
+
+  const detailPage: Page = await context.newPage();
+
+  try {
+    for (const product of shortlist) {
+      try {
+        await detailPage.goto(product.url, {
+          waitUntil: "domcontentloaded",
+          timeout: 45_000,
+        });
+        await detailPage.waitForTimeout(ENRICH_DELAY_MS);
+
+        const bodyText = await detailPage.locator("body").innerText();
+        const material = lineField(bodyText, "Materiál");
+        const fit = lineField(bodyText, "Střih");
+        const color = lineField(bodyText, "Barva");
+        const itemNumber =
+          bodyText.match(/Položka č\.\s*([A-Za-z0-9_-]+)/i)?.[1]?.trim() || null;
+        const materialResult = materialHeuristic(material);
+
+        product.enriched = true;
+        product.material = material;
+        product.fit = fit;
+        product.color = color;
+        product.itemNumber = itemNumber;
+        product.materialScore = materialResult.score;
+        product.qualitySignals = materialResult.signals;
+        product.buyScore = buyScore(product.dealScore, product.materialScore);
+        discoveryState.enrichedProducts += 1;
+      } catch {
+        product.enriched = true;
+      }
+
+      await detailPage.waitForTimeout(ENRICH_DELAY_MS);
+    }
+  } finally {
+    await detailPage.close().catch(() => undefined);
+  }
+
+  discoveryState.products.sort((a, b) => {
+    const aScore = a.buyScore ?? a.dealScore ?? -1;
+    const bScore = b.buyScore ?? b.dealScore ?? -1;
+    return bScore - aScore || a.currentPriceCzk - b.currentPriceCzk;
+  });
 }
 
 async function inspectResponse(response: Response, captureDir: string) {
@@ -144,6 +286,7 @@ export async function runAboutYouDiscovery() {
     productLinks: 0,
     jsonResponses: 0,
     candidateResponses: 0,
+    enrichedProducts: 0,
     startedAt: new Date().toISOString(),
     finishedAt: null,
     error: null,
@@ -218,9 +361,12 @@ export async function runAboutYouDiscovery() {
       if (unchangedSteps >= 10 && step >= 15) break;
     }
 
-    discoveryState.phase = "saving-capture";
-    await page.waitForTimeout(1_200);
+    discoveryState.phase = "preparing-shortlist";
+    await page.waitForTimeout(1_000);
     refreshProducts(productLinks);
+    await enrichShortlist(context);
+
+    discoveryState.phase = "saving-capture";
 
     await fs.writeFile(
       path.join(captureDir, "product-links.json"),
@@ -251,6 +397,7 @@ export async function runAboutYouDiscovery() {
           startUrl: aboutYouCzMen.discovery.startUrl,
           productLinks: discoveryState.productLinks,
           parsedProducts: discoveryState.products.length,
+          enrichedProducts: discoveryState.enrichedProducts,
           jsonResponses: discoveryState.jsonResponses,
           candidateResponses: discoveryState.candidateResponses,
           finishedAt: new Date().toISOString(),
