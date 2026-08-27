@@ -21,6 +21,14 @@ export type ScannedProduct = {
   discountPct: number | null;
   dealScore: number | null;
   verdict: "NEW_LOW" | "TOP" | "GOOD" | "OK" | "EXPENSIVE" | "NO_HISTORY";
+  enriched: boolean;
+  material: string | null;
+  fit: string | null;
+  color: string | null;
+  itemNumber: string | null;
+  materialScore: number | null;
+  buyScore: number | null;
+  qualitySignals: string[];
 };
 
 export type DiscoveryState = {
@@ -32,6 +40,7 @@ export type DiscoveryState = {
   productLinks: number;
   jsonResponses: number;
   candidateResponses: number;
+  enrichedProducts: number;
   startedAt: string | null;
   finishedAt: string | null;
   error: string | null;
@@ -48,6 +57,7 @@ const initialState: DiscoveryState = {
   productLinks: 0,
   jsonResponses: 0,
   candidateResponses: 0,
+  enrichedProducts: 0,
   startedAt: null,
   finishedAt: null,
   error: null,
