@@ -20,7 +20,7 @@ const CATEGORY_URLS: Record<string, string> = {
   "boty": "/c/muzi/boty-20215",
 };
 
-// Verified from public ABOUT YOU CZ category URLs. Unknown colors are not guessed.
+// Verified from public ABOUT YOU CZ category URLs. Unknown values are never guessed.
 const COLOR_IDS: Record<string, string> = {
   "béžová": "38919",
   "modrá": "38920",
@@ -32,18 +32,33 @@ const COLOR_IDS: Record<string, string> = {
   "bílá": "38935",
 };
 
+const MATERIAL_STYLE_IDS: Record<string, string> = {
+  "bavlna": "35459",
+  "vlna": "35462",
+};
+
 export type LiveCatalogResult = {
   sourceUrl: string;
   products: ScannedProduct[];
   fetchedAt: string;
   appliedColor: string | null;
+  appliedMaterial: string | null;
 };
 
-export function aboutYouCategoryUrl(intent: Pick<SearchIntent, "category" | "color">) {
+export function aboutYouCategoryUrl(
+  intent: Pick<SearchIntent, "category" | "color" | "materials">,
+) {
   const pathname = intent.category ? CATEGORY_URLS[intent.category] : null;
   const url = new URL(pathname ?? "/c/muzi-20202", BASE_URL);
+
   const colorId = intent.color ? COLOR_IDS[intent.color] : null;
   if (colorId) url.searchParams.set("color", colorId);
+
+  const verifiedMaterial = intent.materials.find((material) => MATERIAL_STYLE_IDS[material]);
+  if (verifiedMaterial) {
+    url.searchParams.set("materialStyle", MATERIAL_STYLE_IDS[verifiedMaterial]);
+  }
+
   return url.toString();
 }
 
@@ -67,6 +82,7 @@ export function parseAboutYouCategoryHtml(
   html: string,
   sourceUrl: string,
   knownColor: string | null = null,
+  knownMaterialFilter: string | null = null,
 ) {
   const $ = cheerio.load(html);
   const products = new Map<string, ScannedProduct>();
@@ -106,6 +122,9 @@ export function parseAboutYouCategoryHtml(
     const product = parseAboutYouCard(url, rawText);
     if (product) {
       if (knownColor) product.color = knownColor;
+      if (knownMaterialFilter) {
+        product.qualitySignals.push(`ABOUT YOU filtr: ${knownMaterialFilter}`);
+      }
       products.set(url, product);
     }
   });
@@ -118,6 +137,9 @@ export function parseAboutYouCategoryHtml(
 export async function fetchLiveAboutYouCatalog(intent: SearchIntent): Promise<LiveCatalogResult> {
   const sourceUrl = aboutYouCategoryUrl(intent);
   const appliedColor = intent.color && COLOR_IDS[intent.color] ? intent.color : null;
+  const appliedMaterial =
+    intent.materials.find((material) => MATERIAL_STYLE_IDS[material]) ?? null;
+
   const response = await fetch(sourceUrl, {
     headers: {
       Accept: "text/html,application/xhtml+xml",
@@ -138,8 +160,9 @@ export async function fetchLiveAboutYouCatalog(intent: SearchIntent): Promise<Li
 
   return {
     sourceUrl,
-    products: parseAboutYouCategoryHtml(html, sourceUrl, appliedColor),
+    products: parseAboutYouCategoryHtml(html, sourceUrl, appliedColor, appliedMaterial),
     fetchedAt: new Date().toISOString(),
     appliedColor,
+    appliedMaterial,
   };
 }
