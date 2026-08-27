@@ -62,6 +62,15 @@ test("understands generic negative feature instead of requiring it", () => {
   assert.equal(intent.requiredTerms.includes("limecku"), false);
 });
 
+test("does not turn compact price syntax into a required keyword", () => {
+  const intent = parseNaturalSearch("tricko L do 250kc");
+  assert.equal(intent.category, "tričko");
+  assert.equal(intent.size, "L");
+  assert.equal(intent.maxPriceCzk, 250);
+  assert.equal(intent.requiredTerms.includes("250kc"), false);
+  assert.deepEqual(intent.requiredTerms, []);
+});
+
 test("supports common no-logo and no-print phrases", () => {
   const noLogo = parseNaturalSearch("černá mikina bez velkého loga");
   const noPrint = parseNaturalSearch("tričko bez potisku");
