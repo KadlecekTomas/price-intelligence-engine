@@ -11,6 +11,7 @@ type Status = {
   productLinks: number;
   jsonResponses: number;
   candidateResponses: number;
+  enrichedProducts: number;
   startedAt: string | null;
   finishedAt: string | null;
   error: string | null;
@@ -37,6 +38,14 @@ type Product = {
   discountPct: number | null;
   dealScore: number | null;
   verdict: "NEW_LOW" | "TOP" | "GOOD" | "OK" | "EXPENSIVE" | "NO_HISTORY";
+  enriched: boolean;
+  material: string | null;
+  fit: string | null;
+  color: string | null;
+  itemNumber: string | null;
+  materialScore: number | null;
+  buyScore: number | null;
+  qualitySignals: string[];
 };
 
 const emptyStatus: Status = {
@@ -48,6 +57,7 @@ const emptyStatus: Status = {
   productLinks: 0,
   jsonResponses: 0,
   candidateResponses: 0,
+  enrichedProducts: 0,
   startedAt: null,
   finishedAt: null,
   error: null,
@@ -110,6 +120,11 @@ export default function Home() {
     ? Math.min(100, Math.round((status.step / status.totalSteps) * 100))
     : 0;
 
+  const enriched = products.filter((product) => product.enriched && product.material);
+  const shortlist = [...enriched]
+    .sort((a, b) => (b.buyScore ?? -1) - (a.buyScore ?? -1))
+    .slice(0, 24);
+
   return (
     <main className="shell">
       <header className="hero">
@@ -117,7 +132,7 @@ export default function Home() {
           <p className="eyebrow">LOCAL • CZ MARKET • MULTI-SHOP READY</p>
           <h1>Price Intelligence Engine</h1>
           <p className="lede">
-            Hledáme současný datový zdroj a zároveň už z načtených produktových karet počítáme reálnou výhodnost nákupu.
+            Dnešní scan kombinuje cenu vůči 30dennímu minimu s cíleným enrichmentem materiálu u nejzajímavějších pánských kusů.
           </p>
         </div>
         <div className="adapterBadge">
@@ -128,20 +143,20 @@ export default function Home() {
 
       <section className="panel controlPanel">
         <div>
-          <h2>Scan + endpoint discovery</h2>
+          <h2>Scan + shopping shortlist</h2>
           <p>
-            Otevře aktuální český storefront v lokálním Chromiu, sbírá viditelné produkty a současně hledá bulk JSON endpoint pro celý katalog.
+            Chromium projde aktuální český storefront, najde dealy, u nejlepšího oblečení otevře jen omezený počet detailů kvůli materiálu a zároveň hledá bulk endpoint pro pozdější kompletní sync.
           </p>
         </div>
         <button onClick={startDiscovery} disabled={status.running || starting}>
-          {status.running ? "Scan běží…" : starting ? "Spouštím…" : "Spustit scan"}
+          {status.running ? "Scan běží…" : starting ? "Spouštím…" : "Spustit dnešní scan"}
         </button>
       </section>
 
       <section className="stats">
         <article className="stat"><span>Fáze</span><strong>{status.phase}</strong></article>
         <article className="stat"><span>Product links</span><strong>{status.productLinks.toLocaleString("cs-CZ")}</strong></article>
-        <article className="stat"><span>Vyhodnocené dealy</span><strong>{products.length.toLocaleString("cs-CZ")}</strong></article>
+        <article className="stat"><span>Materiál ověřen</span><strong>{status.enrichedProducts.toLocaleString("cs-CZ")}</strong></article>
         <article className="stat"><span>Endpoint kandidáti</span><strong>{status.candidateResponses.toLocaleString("cs-CZ")}</strong></article>
       </section>
 
@@ -155,9 +170,57 @@ export default function Home() {
       <section className="panel">
         <div className="sectionHeading">
           <div>
-            <h2>Nejlepší nákupní kandidáti právě teď</h2>
+            <h2>Shortlist: cena + materiál</h2>
             <p>
-              Řazení vychází z aktuální ceny vůči deklarovanému 30dennímu minimu. Nízká cena není automaticky známka kvality produktu — materiálové a značkové enrichment přidáme až nad shortlistem.
+              Buy score = 68 % cenový deal + 32 % jednoduchý materiálový signál. Není to objektivní známka zpracování značky; slouží k rychlému vyřazení drahých nebo materiálově slabých kandidátů před nákupem.
+            </p>
+          </div>
+        </div>
+
+        {shortlist.length === 0 ? (
+          <div className="empty">Po dokončení scanu se tu objeví oblečení s ověřeným materiálem.</div>
+        ) : (
+          <div className="tableWrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Buy</th>
+                  <th>Deal</th>
+                  <th>Materiál</th>
+                  <th>Teď</th>
+                  <th>30d minimum</th>
+                  <th>Produkt</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shortlist.map((product) => (
+                  <tr key={product.id}>
+                    <td><span className="score">{product.buyScore ?? "—"}</span></td>
+                    <td>{product.dealScore === null ? "—" : Math.round(product.dealScore)}</td>
+                    <td title={product.qualitySignals.join(", ") || undefined}>
+                      {product.material ?? "—"}
+                    </td>
+                    <td>{money(product.currentPriceCzk)}</td>
+                    <td>{money(product.lowest30dCzk)}</td>
+                    <td className="urlCell">
+                      <a href={product.url} target="_blank" rel="noreferrer" title={product.text}>
+                        {product.text}
+                      </a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section className="panel">
+        <div className="sectionHeading">
+          <div>
+            <h2>Všechny nalezené cenové dealy</h2>
+            <p>
+              Tohle je čistě cenové pořadí. Produkt bez materiálového enrichmentu ještě nepovažujeme za doporučení ke koupi.
             </p>
           </div>
         </div>
@@ -178,7 +241,7 @@ export default function Home() {
                 </tr>
               </thead>
               <tbody>
-                {products.slice(0, 40).map((product) => (
+                {products.slice(0, 50).map((product) => (
                   <tr key={product.id}>
                     <td><span className="score">{verdictLabels[product.verdict]}</span></td>
                     <td>{product.dealScore === null ? "—" : Math.round(product.dealScore)}</td>
@@ -205,7 +268,7 @@ export default function Home() {
       <section className="panel">
         <div className="sectionHeading">
           <div>
-            <h2>Nejlepší endpoint kandidáti</h2>
+            <h2>Endpoint discovery</h2>
             <p>Vyšší score = větší šance, že response obsahuje produkty, ceny, varianty nebo pagination.</p>
           </div>
         </div>
