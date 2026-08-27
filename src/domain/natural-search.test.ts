@@ -81,6 +81,12 @@ test("keeps half shoe sizes and supports XXS", () => {
   assert.equal(parseNaturalSearch("tričko XXS").size, "XXS");
 });
 
+test("does not infer apparel size from brand punctuation", () => {
+  assert.equal(parseNaturalSearch("Levi's tričko").size, null);
+  assert.equal(parseNaturalSearch("H&M tričko").size, null);
+  assert.equal(parseNaturalSearch("S.Oliver tričko").size, null);
+});
+
 test("persisted search matches half shoe and combined jeans sizes", () => {
   const shoes = searchProducts([
     product({
