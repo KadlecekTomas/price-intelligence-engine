@@ -46,3 +46,31 @@ export function sizeAvailabilityFromText(text: string, requestedSize: string): S
   if (/dostupne v mnoha velikostech/.test(normalizedText)) return "unknown";
   return "unknown";
 }
+
+export function textMatchesRequestedSize(text: string, requestedSize: string) {
+  const availability = sizeAvailabilityFromText(text, requestedSize);
+  if (availability !== "unknown") return availability === "yes";
+
+  const target = normalizeSize(requestedSize);
+  const normalizedText = stripDiacritics(text)
+    .toUpperCase()
+    .replace(/\u00a0/g, " ")
+    .replace(/,/g, ".")
+    .replace(/×/g, "X")
+    .replace(/\s+/g, " ");
+
+  const explicitMention = normalizedText.match(/(?:VELIKOST|SIZE)\s*:?\s*([^ ]+)/)?.[1];
+  if (explicitMention && normalizeSize(explicitMention) === target) return true;
+
+  if (/^W\d{2}\/L\d{2}$/.test(target)) {
+    const compactText = normalizedText.replace(/\s+/g, "");
+    return compactText.includes(target) || compactText.includes(target.replace("/L", "X"));
+  }
+
+  if (/^(?:XXXL|XXL|XL|XXS|XS|L|M|S)$/.test(target)) {
+    const tokens = normalizedText.split(/[^A-Z0-9]+/).filter(Boolean);
+    return tokens.includes(target);
+  }
+
+  return false;
+}
