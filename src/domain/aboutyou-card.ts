@@ -19,16 +19,21 @@ export function parseAboutYouCard(url: string, rawText: string): ScannedProduct 
   const text = rawText.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
   if (!text || !/Kč/i.test(text)) return null;
 
-  const priceMatches = [...text.matchAll(/(?:Od\s*)?([0-9][0-9\s.]*)\s*Kč/gi)];
-  const currentPriceCzk = parseCzk(priceMatches[0]?.[1]);
-  if (!currentPriceCzk) return null;
-
   const originalPriceCzk = parseCzk(
     text.match(/Původně:\s*(?:Od\s*)?([0-9][0-9\s.]*)\s*Kč/i)?.[1],
   );
   const lowest30dCzk = parseCzk(
     text.match(/Poslední nejnižší cena:\s*(?:Od\s*)?([0-9][0-9\s.]*)\s*Kč/i)?.[1],
   );
+
+  // DOM/text order is not guaranteed. Remove labeled reference prices first so
+  // an old/30-day price rendered before the current price cannot become the current price.
+  const currentPriceText = text
+    .replace(/Původně:\s*(?:Od\s*)?[0-9][0-9\s.]*\s*Kč/gi, " ")
+    .replace(/Poslední nejnižší cena:\s*(?:Od\s*)?[0-9][0-9\s.]*\s*Kč/gi, " ");
+  const priceMatches = [...currentPriceText.matchAll(/(?:Od\s*)?([0-9][0-9\s.]*)\s*Kč/gi)];
+  const currentPriceCzk = parseCzk(priceMatches[0]?.[1]);
+  if (!currentPriceCzk) return null;
 
   const ratioToLow = lowest30dCzk ? currentPriceCzk / lowest30dCzk : null;
   const discountPct = originalPriceCzk
