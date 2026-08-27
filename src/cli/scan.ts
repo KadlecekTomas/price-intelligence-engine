@@ -7,6 +7,11 @@ import {
   persistScanProducts,
   readLatestProducts,
 } from "@/lib/database";
+import {
+  filterAndRankProducts,
+  parseShoppingFilters,
+  type ShoppingFilters,
+} from "@/domain/shopping-filters";
 
 function money(value: number | null | undefined) {
   return value == null ? "—" : `${value.toLocaleString("cs-CZ")} Kč`;
@@ -16,19 +21,25 @@ function pct(value: number | null) {
   return value === null ? "—" : `${Math.round(value * 100)} %`;
 }
 
-function shortlist(products: ScannedProduct[]) {
-  return [...products]
-    .filter((product) => product.currentPriceCzk > 0)
-    .sort((a, b) => {
-      const aScore = a.buyScore ?? a.dealScore ?? -1;
-      const bScore = b.buyScore ?? b.dealScore ?? -1;
-      return bScore - aScore || a.currentPriceCzk - b.currentPriceCzk;
-    })
-    .slice(0, 30);
+function filterSummary(filters: ShoppingFilters) {
+  const active = [
+    filters.maxPriceCzk !== null ? `max ${money(filters.maxPriceCzk)}` : null,
+    filters.minBuyScore !== null ? `buy ≥ ${filters.minBuyScore}` : null,
+    filters.minHistoryScore !== null ? `historie ≥ ${filters.minHistoryScore}` : null,
+    filters.contains ? `obsahuje „${filters.contains}“` : null,
+    filters.size ? `velikost ${filters.size}` : null,
+    `limit ${filters.limit}`,
+  ].filter(Boolean);
+
+  return active.join(" · ");
 }
 
-function reportMarkdown(products: ScannedProduct[]) {
-  const rows = shortlist(products)
+function reportMarkdown(
+  allProducts: ScannedProduct[],
+  filteredProducts: ScannedProduct[],
+  filters: ShoppingFilters,
+) {
+  const rows = filteredProducts
     .map((product, index) => {
       const score = product.buyScore ?? product.dealScore ?? "—";
       const historyScore = product.historyScore == null ? "—" : Math.round(product.historyScore);
@@ -40,16 +51,40 @@ function reportMarkdown(products: ScannedProduct[]) {
 
   return `# Dnešní shopping shortlist\n\n` +
     `Run: \`${discoveryState.runId ?? "unknown"}\`  \n` +
+    `Filtry: **${filterSummary(filters)}**  \n` +
     `Nalezeno produktových odkazů: **${discoveryState.productLinks}**  \n` +
-    `Vyhodnoceno produktů: **${products.length}**  \n` +
+    `Vyhodnoceno produktů: **${allProducts.length}**  \n` +
+    `Po filtrech: **${filteredProducts.length}**  \n` +
     `Materiálově ověřeno: **${discoveryState.enrichedProducts}**\n\n` +
-    `> Buy score kombinuje cenový a materiálový signál. „30d min“ je údaj e-shopu; „Naše min“ vzniká výhradně z uložených price snapshotů a po více scanech je pro nás důležitější.\n\n` +
+    `> Buy score kombinuje cenový a materiálový signál. „30d min“ je údaj e-shopu; „Naše min“ vzniká výhradně z uložených price snapshotů a po více scanech je pro nás důležitější. Velikostní filtr je zatím best-effort nad textem produktové karty, dokud nemáme variant-level endpoint.\n\n` +
     `| # | Buy | Historie | Cena | 30d min | Naše min | Obs. | Materiál | Produkt |\n` +
-    `|---:|---:|---:|---:|---:|---:|---:|---|---|\n${rows}\n`;
+    `|---:|---:|---:|---:|---:|---:|---:|---|---|\n${rows || "| — | — | — | — | — | — | — | — | Žádný produkt neprošel filtry |"}\n`;
+}
+
+function printHelp() {
+  console.log(`\nPrice Intelligence Engine — shopping filters\n\n` +
+    `npm run scan -- [filtry]\n\n` +
+    `  --max-price=2000      maximální cena v Kč\n` +
+    `  --min-buy=70          minimální Buy score\n` +
+    `  --min-history=80      minimální vlastní history score (vyžaduje více DB snapshotů)\n` +
+    `  --contains=tričko     textový filtr produktu/materiálu\n` +
+    `  --size=L              best-effort velikostní filtr z textu produktové karty\n` +
+    `  --limit=20            počet výsledků, 1–100\n\n` +
+    `Příklad:\n` +
+    `  npm run scan -- --max-price=2000 --contains=tričko --min-buy=70 --limit=15\n`);
 }
 
 async function main() {
+  const args = process.argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) {
+    printHelp();
+    return;
+  }
+
+  const filters = parseShoppingFilters(args);
+
   console.log("\nPrice Intelligence Engine — ABOUT YOU CZ / Muži");
+  console.log(`Filtry: ${filterSummary(filters)}`);
   console.log("Spouštím lokální Chromium scan…\n");
 
   await runAboutYouDiscovery();
@@ -78,14 +113,18 @@ async function main() {
     console.log("DATABASE_URL není nastavený — pokračuji čistě lokálně.");
   }
 
+  const filtered = filterAndRankProducts(reportProducts, filters);
   const runDir = path.resolve("data", "runs", discoveryState.runId);
   const reportPath = path.join(runDir, "shopping-report.md");
-  await fs.writeFile(reportPath, reportMarkdown(reportProducts), "utf8");
+  await fs.writeFile(
+    reportPath,
+    reportMarkdown(reportProducts, filtered, filters),
+    "utf8",
+  );
 
-  const top = shortlist(reportProducts).slice(0, 15);
-  console.log("\nTOP kandidáti:\n");
+  console.log(`\nTOP kandidáti po filtrech (${filtered.length}):\n`);
   console.table(
-    top.map((product) => ({
+    filtered.map((product) => ({
       buy: product.buyScore ?? product.dealScore ?? "—",
       historie: product.historyScore == null ? "—" : Math.round(product.historyScore),
       cena: money(product.currentPriceCzk),
@@ -99,7 +138,8 @@ async function main() {
   );
 
   console.log(`\nReport: ${reportPath}`);
-  console.log(`Produkty: ${reportProducts.length}`);
+  console.log(`Vyhodnoceno: ${reportProducts.length}`);
+  console.log(`Po filtrech: ${filtered.length}`);
   console.log(`Endpoint kandidáti: ${discoveryState.candidateResponses}`);
   console.log("\nHotovo.\n");
 }
