@@ -338,9 +338,32 @@ export async function runAboutYouDiscovery() {
         .evaluateAll((nodes) =>
           nodes.map((node) => {
             const anchor = node as HTMLAnchorElement;
+            const normalize = (value: string | null | undefined) =>
+              (value ?? "").replace(/\s+/g, " ").trim();
+
+            const anchorText = normalize(anchor.textContent);
+            let firstPriceText: string | null = /Kč/.test(anchorText) ? anchorText : null;
+            let preferredText: string | null = null;
+            let current: HTMLElement | null = anchor;
+
+            for (let depth = 0; depth < 7 && current; depth += 1) {
+              const candidate = normalize(current.innerText || current.textContent);
+
+              if (candidate.length > 0 && candidate.length <= 2_500 && /Kč/.test(candidate)) {
+                firstPriceText ??= candidate;
+
+                if (/Poslední nejnižší cena|Původně:/i.test(candidate)) {
+                  preferredText = candidate;
+                  break;
+                }
+              }
+
+              current = current.parentElement;
+            }
+
             return {
               url: anchor.href,
-              text: (anchor.textContent ?? "").replace(/\s+/g, " ").trim(),
+              text: preferredText ?? firstPriceText ?? anchorText,
             };
           }),
         );
