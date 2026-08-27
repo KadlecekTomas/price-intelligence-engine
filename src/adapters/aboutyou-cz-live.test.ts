@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { aboutYouCategoryUrl, parseAboutYouCategoryHtml } from "@/adapters/aboutyou-cz-live";
+import {
+  aboutYouCategoryUrl,
+  aboutYouLiveBatchSpecs,
+  parseAboutYouCategoryHtml,
+} from "@/adapters/aboutyou-cz-live";
 import { parseNaturalSearch } from "@/domain/natural-search";
 
 const HTML = `
@@ -52,6 +56,18 @@ test("maps verified material together with color", () => {
     aboutYouCategoryUrl(intent, { color: null, material: "bavlna" }),
     "https://www.aboutyou.cz/c/muzi/obleceni/tricka-20324?materialStyle=35459",
   );
+});
+
+test("marks a slice exact only when all requested server-side constraints are actually applied", () => {
+  const exact = aboutYouLiveBatchSpecs(parseNaturalSearch("černé tričko bavlna"));
+  assert.deepEqual(exact[0], { color: "černá", material: "bavlna", confidence: "exact" });
+
+  const unsupportedMaterial = aboutYouLiveBatchSpecs(parseNaturalSearch("černý svetr merino"));
+  assert.deepEqual(unsupportedMaterial[0], { color: "černá", material: null, confidence: "partial" });
+  assert.equal(unsupportedMaterial.some((spec) => spec.confidence === "exact"), false);
+
+  const onlyUnsupportedMaterial = aboutYouLiveBatchSpecs(parseNaturalSearch("svetr merino"));
+  assert.deepEqual(onlyUnsupportedMaterial, [{ color: null, material: null, confidence: "broad" }]);
 });
 
 test("falls back to the men root category", () => {
