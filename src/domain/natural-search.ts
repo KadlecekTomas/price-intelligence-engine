@@ -151,17 +151,16 @@ function normalizeSizeText(value: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .toUpperCase()
     .replace(/\u00a0/g, " ")
-    .replace(/[^A-Z0-9.,/X ]/g, " ")
+    // Keep brand-joining punctuation so LEVI'S / H&M / S.OLIVER cannot become S/M size tokens.
+    .replace(/[^A-Z0-9.,/'&.X ]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 function parseSize(raw: string) {
   const normalized = normalizeSizeText(raw);
-  const tokens = normalized.split(/[^A-Z0-9]+/).filter(Boolean);
-  const apparelSizes = new Set(["XXXL", "XXL", "XL", "XXS", "XS", "L", "M", "S"]);
-  const apparel = tokens.find((token) => apparelSizes.has(token));
-  if (apparel) return apparel;
+  const apparel = normalized.match(/(?:^|[\s,;/])(XXXL|XXL|XL|XXS|XS|L|M|S)(?=$|[\s,;/])/);
+  if (apparel?.[1]) return apparel[1];
 
   const waist = normalized.match(/(?:^|\s)(W\s?\d{2}(?:\s*[/X]\s*L?\d{2})?|W\s?\d{2}|L\s?\d{2})(?:\s|$)/);
   if (waist?.[1]) {
