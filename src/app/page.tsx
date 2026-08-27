@@ -70,6 +70,14 @@ const RECOMMENDATIONS: Record<Result["recommendation"], { label: string; classNa
   CHECK: { label: "PROVĚŘIT", className: "check" },
 };
 
+const NEGATIVE_DISPLAY_FORMS: Record<string, string> = {
+  "límeček": "límečku",
+  logo: "loga",
+  potisk: "potisku",
+  kapuce: "kapuce",
+  zip: "zipu",
+};
+
 function money(value: number | null | undefined) {
   return value == null ? "—" : `${value.toLocaleString("cs-CZ")} Kč`;
 }
@@ -92,6 +100,17 @@ function sourceLabel(data: SearchResponse | null) {
   return "lokální data";
 }
 
+function countLabel(value: number, one: string, few: string, many: string) {
+  const absolute = Math.abs(value);
+  if (absolute === 1) return one;
+  if (absolute >= 2 && absolute <= 4) return few;
+  return many;
+}
+
+function negativeTermLabel(term: string) {
+  return `bez ${NEGATIVE_DISPLAY_FORMS[term] ?? term}`;
+}
+
 function intentChips(intent: Intent | null) {
   if (!intent) return [];
   return [
@@ -101,7 +120,7 @@ function intentChips(intent: Intent | null) {
     intent.maxPriceCzk ? `do ${money(intent.maxPriceCzk)}` : null,
     ...intent.materials,
     ...intent.excludedMaterials.map((material) => `bez ${material}`),
-    ...intent.excludedTerms.map((term) => `bez ${term}`),
+    ...intent.excludedTerms.map(negativeTermLabel),
     ...intent.requiredTerms,
     intent.qualityPreferred ? "priorita kvalita" : null,
     intent.sort === "history" ? "řadit podle historie" : null,
@@ -151,6 +170,9 @@ export default function Home() {
     !loading && data && data.results.length === 0 && (data.nearMatches?.length ?? 0) > 0,
   );
   const displayResults = showingNearMatches ? (data?.nearMatches ?? []) : (data?.results ?? []);
+  const resultCount = data?.resultCount ?? 0;
+  const candidateCount = data?.scannedProducts ?? 0;
+  const batchCount = data?.liveBatches ?? 0;
 
   return (
     <main className="shoppingShell">
@@ -205,16 +227,16 @@ export default function Home() {
           </div>
         </div>
         <div className="dataStatus">
-          <strong>{data?.resultCount ?? 0}</strong>
-          <span>přesných výsledků</span>
+          <strong>{resultCount}</strong>
+          <span>{countLabel(resultCount, "přesný výsledek", "přesné výsledky", "přesných výsledků")}</span>
           <i />
-          <strong>{data?.scannedProducts ?? 0}</strong>
-          <span>unikátních kandidátů</span>
-          {data?.liveBatches ? (
+          <strong>{candidateCount}</strong>
+          <span>{countLabel(candidateCount, "unikátní kandidát", "unikátní kandidáti", "unikátních kandidátů")}</span>
+          {batchCount > 0 ? (
             <>
               <i />
-              <strong>{data.liveBatches}</strong>
-              <span>live výřezy</span>
+              <strong>{batchCount}</strong>
+              <span>{countLabel(batchCount, "live výřez", "live výřezy", "live výřezů")}</span>
             </>
           ) : null}
           <i />

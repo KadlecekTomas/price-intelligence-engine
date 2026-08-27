@@ -203,6 +203,11 @@ function isConsumedTerm(term: string) {
   return aliases.some((alias) => tokenMatchesAlias(term, alias));
 }
 
+function isCompactPriceToken(term: string) {
+  return /^\d+(?:[.,]\d+)?(?:kc|czk|korun|koruny|koruna|k)?$/i.test(term)
+    || /^\d+(?:[.,]\d+)?tis(?:ic|ice|icu)?$/i.test(term);
+}
+
 export function parseNaturalSearch(raw: string): SearchIntent {
   const text = fold(raw);
   const categoryEntry = CATEGORIES.find(([, aliases]) => containsAlias(text, aliases));
@@ -232,6 +237,7 @@ export function parseNaturalSearch(raw: string): SearchIntent {
     .filter((term) => !STOP_WORDS.has(term))
     .filter((term) => !negatedTokens.has(term))
     .filter((term) => !isConsumedTerm(term))
+    .filter((term) => !isCompactPriceToken(term))
     .filter((term) => !/^\d+$/.test(term))
     .filter((term) => !/^(xxxl|xxl|xl|xs|l|m|s|w\d+|l\d+)$/.test(term));
 
