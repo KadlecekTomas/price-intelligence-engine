@@ -20,15 +20,31 @@ const CATEGORY_URLS: Record<string, string> = {
   "boty": "/c/muzi/boty-20215",
 };
 
+// Verified from public ABOUT YOU CZ category URLs. Unknown colors are not guessed.
+const COLOR_IDS: Record<string, string> = {
+  "béžová": "38919",
+  "modrá": "38920",
+  "hnědá": "38921",
+  "šedá": "38925",
+  "zelená": "38926",
+  "červená": "38931",
+  "černá": "38932",
+  "bílá": "38935",
+};
+
 export type LiveCatalogResult = {
   sourceUrl: string;
   products: ScannedProduct[];
   fetchedAt: string;
+  appliedColor: string | null;
 };
 
-export function aboutYouCategoryUrl(intent: Pick<SearchIntent, "category">) {
+export function aboutYouCategoryUrl(intent: Pick<SearchIntent, "category" | "color">) {
   const pathname = intent.category ? CATEGORY_URLS[intent.category] : null;
-  return new URL(pathname ?? "/c/muzi-20202", BASE_URL).toString();
+  const url = new URL(pathname ?? "/c/muzi-20202", BASE_URL);
+  const colorId = intent.color ? COLOR_IDS[intent.color] : null;
+  if (colorId) url.searchParams.set("color", colorId);
+  return url.toString();
 }
 
 function normalize(value: string) {
@@ -47,7 +63,11 @@ function canonicalProductUrl(href: string, sourceUrl: string) {
   }
 }
 
-export function parseAboutYouCategoryHtml(html: string, sourceUrl: string) {
+export function parseAboutYouCategoryHtml(
+  html: string,
+  sourceUrl: string,
+  knownColor: string | null = null,
+) {
   const $ = cheerio.load(html);
   const products = new Map<string, ScannedProduct>();
 
@@ -84,7 +104,10 @@ export function parseAboutYouCategoryHtml(html: string, sourceUrl: string) {
 
     const rawText = preferredText ?? firstPriceText ?? normalize($(element).text());
     const product = parseAboutYouCard(url, rawText);
-    if (product) products.set(url, product);
+    if (product) {
+      if (knownColor) product.color = knownColor;
+      products.set(url, product);
+    }
   });
 
   return [...products.values()]
@@ -94,6 +117,7 @@ export function parseAboutYouCategoryHtml(html: string, sourceUrl: string) {
 
 export async function fetchLiveAboutYouCatalog(intent: SearchIntent): Promise<LiveCatalogResult> {
   const sourceUrl = aboutYouCategoryUrl(intent);
+  const appliedColor = intent.color && COLOR_IDS[intent.color] ? intent.color : null;
   const response = await fetch(sourceUrl, {
     headers: {
       Accept: "text/html,application/xhtml+xml",
@@ -114,7 +138,8 @@ export async function fetchLiveAboutYouCatalog(intent: SearchIntent): Promise<Li
 
   return {
     sourceUrl,
-    products: parseAboutYouCategoryHtml(html, sourceUrl),
+    products: parseAboutYouCategoryHtml(html, sourceUrl, appliedColor),
     fetchedAt: new Date().toISOString(),
+    appliedColor,
   };
 }
