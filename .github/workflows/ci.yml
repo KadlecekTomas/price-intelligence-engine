@@ -14,10 +14,8 @@ jobs:
         with:
           node-version: 22
       - run: npm install
-      - name: Install Chromium for temporary ABOUT YOU bundle probe
-        run: npx playwright install --with-deps chromium
-      - name: Temporary ABOUT YOU bundle locator
-        run: node scripts/probe-aboutyou-network.mjs
+      - name: Temporary ABOUT YOU exact protobuf source discovery
+        run: node scripts/discover-aboutyou.mjs
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
