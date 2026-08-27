@@ -243,6 +243,9 @@ export async function readLatestProducts(limit = 200): Promise<ScannedProduct[]>
       material_score: number | null;
       buy_score: number | null;
       verdict: ScannedProduct["verdict"];
+      observed_min_czk: number;
+      observed_max_czk: number;
+      observation_count: number;
     }>
   >`
     WITH latest AS (
@@ -258,6 +261,14 @@ export async function readLatestProducts(limit = 200): Promise<ScannedProduct[]>
         captured_at
       FROM price_snapshots
       ORDER BY product_id, captured_at DESC
+    ), history AS (
+      SELECT
+        product_id,
+        MIN(current_price_czk)::INTEGER AS observed_min_czk,
+        MAX(current_price_czk)::INTEGER AS observed_max_czk,
+        COUNT(*)::INTEGER AS observation_count
+      FROM price_snapshots
+      GROUP BY product_id
     )
     SELECT
       p.external_key,
@@ -274,8 +285,12 @@ export async function readLatestProducts(limit = 200): Promise<ScannedProduct[]>
       latest.deal_score,
       latest.material_score,
       latest.buy_score,
-      latest.verdict
+      latest.verdict,
+      history.observed_min_czk,
+      history.observed_max_czk,
+      history.observation_count
     FROM latest
+    JOIN history ON history.product_id = latest.product_id
     JOIN products p ON p.id = latest.product_id
     WHERE p.market = 'CZ'
     ORDER BY COALESCE(latest.buy_score, latest.deal_score, -1) DESC, latest.current_price_czk ASC
@@ -289,6 +304,13 @@ export async function readLatestProducts(limit = 200): Promise<ScannedProduct[]>
     const discountPct = row.original_price_czk
       ? Math.max(0, 1 - row.current_price_czk / row.original_price_czk)
       : null;
+    const ratioToObservedMin = row.observed_min_czk
+      ? row.current_price_czk / row.observed_min_czk
+      : null;
+    const historyScore =
+      row.observation_count >= 2 && ratioToObservedMin !== null
+        ? Math.max(0, Math.min(100, 100 - (ratioToObservedMin - 1) * 100))
+        : null;
 
     return {
       id: row.external_key,
@@ -309,6 +331,11 @@ export async function readLatestProducts(limit = 200): Promise<ScannedProduct[]>
       materialScore: row.material_score,
       buyScore: row.buy_score,
       qualitySignals: row.quality_signals ?? [],
+      observedMinCzk: row.observed_min_czk,
+      observedMaxCzk: row.observed_max_czk,
+      observationCount: row.observation_count,
+      ratioToObservedMin,
+      historyScore,
     };
   });
 }
