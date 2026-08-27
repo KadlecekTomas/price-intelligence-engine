@@ -12,6 +12,10 @@ import {
   parseShoppingFilters,
   type ShoppingFilters,
 } from "@/domain/shopping-filters";
+import {
+  analyzeJsonCandidate,
+  rankEndpointAnalyses,
+} from "@/domain/endpoint-analysis";
 
 function money(value: number | null | undefined) {
   return value == null ? "—" : `${value.toLocaleString("cs-CZ")} Kč`;
@@ -59,6 +63,30 @@ function reportMarkdown(
     `> Buy score kombinuje cenový a materiálový signál. „30d min“ je údaj e-shopu; „Naše min“ vzniká výhradně z uložených price snapshotů a po více scanech je pro nás důležitější. Velikostní filtr je zatím best-effort nad textem produktové karty, dokud nemáme variant-level endpoint.\n\n` +
     `| # | Buy | Historie | Cena | 30d min | Naše min | Obs. | Materiál | Produkt |\n` +
     `|---:|---:|---:|---:|---:|---:|---:|---|---|\n${rows || "| — | — | — | — | — | — | — | — | Žádný produkt neprošel filtry |"}\n`;
+}
+
+async function analyzeCapturedEndpoints(runDir: string) {
+  const analyses = [];
+
+  for (const candidate of discoveryState.candidates) {
+    try {
+      const samplePath = path.join(runDir, candidate.sampleFile);
+      const raw = await fs.readFile(samplePath, "utf8");
+      const payload: unknown = JSON.parse(raw);
+      analyses.push(analyzeJsonCandidate(candidate, payload));
+    } catch {
+      // A malformed or already-removed response sample is not a useful candidate.
+    }
+  }
+
+  const ranked = rankEndpointAnalyses(analyses);
+  await fs.writeFile(
+    path.join(runDir, "endpoint-analysis.json"),
+    JSON.stringify(ranked, null, 2),
+    "utf8",
+  );
+
+  return ranked;
 }
 
 function printHelp() {
@@ -122,6 +150,9 @@ async function main() {
     "utf8",
   );
 
+  const endpointAnalyses = await analyzeCapturedEndpoints(runDir);
+  const bestEndpoint = endpointAnalyses[0];
+
   console.log(`\nTOP kandidáti po filtrech (${filtered.length}):\n`);
   console.table(
     filtered.map((product) => ({
@@ -137,7 +168,25 @@ async function main() {
     })),
   );
 
+  if (bestEndpoint) {
+    const bestArray = bestEndpoint.productArrays[0];
+    const largestTotal = bestEndpoint.numericTotals[0];
+    console.log("\nNejlepší endpoint kandidát:\n");
+    console.table([
+      {
+        bulk: bestEndpoint.likelyBulk ? "ANO" : "zatím ne",
+        score: bestEndpoint.totalScore,
+        pole: bestArray?.path ?? "—",
+        polozekVeVzorku: bestArray?.length ?? "—",
+        total: largestTotal?.value ?? "—",
+        pagination: bestEndpoint.paginationKeys.slice(0, 4).join(", ") || "—",
+        url: bestEndpoint.url,
+      },
+    ]);
+  }
+
   console.log(`\nReport: ${reportPath}`);
+  console.log(`Endpoint analýza: ${path.join(runDir, "endpoint-analysis.json")}`);
   console.log(`Vyhodnoceno: ${reportProducts.length}`);
   console.log(`Po filtrech: ${filtered.length}`);
   console.log(`Endpoint kandidáti: ${discoveryState.candidateResponses}`);
