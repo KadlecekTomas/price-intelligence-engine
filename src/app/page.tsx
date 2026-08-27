@@ -51,6 +51,11 @@ type Product = {
   materialScore: number | null;
   buyScore: number | null;
   qualitySignals: string[];
+  observedMinCzk?: number | null;
+  observedMaxCzk?: number | null;
+  observationCount?: number;
+  ratioToObservedMin?: number | null;
+  historyScore?: number | null;
 };
 
 const emptyStatus: Status = {
@@ -82,8 +87,8 @@ const verdictLabels: Record<Product["verdict"], string> = {
   NO_HISTORY: "BEZ HISTORIE",
 };
 
-function money(value: number | null) {
-  return value === null ? "—" : `${value.toLocaleString("cs-CZ")} Kč`;
+function money(value: number | null | undefined) {
+  return value == null ? "—" : `${value.toLocaleString("cs-CZ")} Kč`;
 }
 
 export default function Home() {
@@ -149,7 +154,7 @@ export default function Home() {
           </p>
           <h1>Price Intelligence Engine</h1>
           <p className="lede">
-            Dnešní scan kombinuje cenu vůči 30dennímu minimu s cíleným enrichmentem materiálu u nejzajímavějších pánských kusů.
+            Dnešní scan kombinuje 30denní minimum e-shopu, naši vlastní cenovou historii a materiálový signál přizpůsobený typu oblečení.
           </p>
         </div>
         <div className="adapterBadge">
@@ -163,8 +168,8 @@ export default function Home() {
           <h2>{hosted ? "Hosted dashboard" : "Scan + shopping shortlist"}</h2>
           <p>
             {hosted
-              ? "Dashboard je bezpečně nasazený na Vercelu. Playwright scan zůstává zatím lokální; po připojení databáze a workeru sem potečou perzistentní výsledky automaticky."
-              : "Chromium projde aktuální český storefront, najde dealy, u nejlepšího oblečení otevře omezený počet detailů kvůli materiálu a zároveň hledá bulk endpoint pro pozdější kompletní sync."}
+              ? "Dashboard je bezpečně nasazený na Vercelu. Playwright scan zůstává lokální; jakmile je nastavený DATABASE_URL, čte dashboard stejné perzistentní snapshoty jako worker."
+              : "Chromium projde aktuální český storefront, najde dealy, u nejlepšího oblečení ověří materiál a zároveň hledá bulk endpoint pro pozdější kompletní sync."}
           </p>
         </div>
         <button
@@ -193,7 +198,7 @@ export default function Home() {
         <div className="progressTrack"><div className="progressValue" style={{ width: `${progress}%` }} /></div>
         <p className="muted">
           {hosted
-            ? "Perzistentní data připojíme přes DB + samostatný worker. Vercel zatím slouží jako bezpečný dashboard."
+            ? `Persistence: ${status.capabilities.persistence}`
             : `Run: ${status.runId ?? "zatím žádný"}`}
         </p>
         {status.error ? <p className="error">{status.error}</p> : null}
@@ -202,9 +207,9 @@ export default function Home() {
       <section className="panel">
         <div className="sectionHeading">
           <div>
-            <h2>Shortlist: cena + materiál</h2>
+            <h2>Shortlist: cena + historie + materiál</h2>
             <p>
-              Buy score = 68 % cenový deal + 32 % jednoduchý materiálový signál. Není to objektivní známka zpracování značky; slouží k rychlému vyřazení drahých nebo materiálově slabých kandidátů před nákupem.
+              Materiálový scoring už rozlišuje trička, úplety, denim, outerwear a sport. Naše historické minimum se počítá výhradně z vlastních uložených snapshotů.
             </p>
           </div>
         </div>
@@ -212,7 +217,7 @@ export default function Home() {
         {shortlist.length === 0 ? (
           <div className="empty">
             {hosted
-              ? "Hosted dashboard čeká na perzistentní data z workeru."
+              ? "Hosted dashboard čeká na první perzistentní scan z workeru."
               : "Po dokončení scanu se tu objeví oblečení s ověřeným materiálem."}
           </div>
         ) : (
@@ -222,9 +227,12 @@ export default function Home() {
                 <tr>
                   <th>Buy</th>
                   <th>Deal</th>
+                  <th>Historie</th>
                   <th>Materiál</th>
                   <th>Teď</th>
-                  <th>30d minimum</th>
+                  <th>30d min</th>
+                  <th>Naše min</th>
+                  <th>Obs.</th>
                   <th>Produkt</th>
                 </tr>
               </thead>
@@ -233,11 +241,14 @@ export default function Home() {
                   <tr key={product.id}>
                     <td><span className="score">{product.buyScore ?? "—"}</span></td>
                     <td>{product.dealScore === null ? "—" : Math.round(product.dealScore)}</td>
+                    <td>{product.historyScore == null ? "—" : Math.round(product.historyScore)}</td>
                     <td title={product.qualitySignals.join(", ") || undefined}>
                       {product.material ?? "—"}
                     </td>
                     <td>{money(product.currentPriceCzk)}</td>
                     <td>{money(product.lowest30dCzk)}</td>
+                    <td>{money(product.observedMinCzk)}</td>
+                    <td>{product.observationCount ?? "—"}</td>
                     <td className="urlCell">
                       <a href={product.url} target="_blank" rel="noreferrer" title={product.text}>
                         {product.text}
@@ -256,14 +267,14 @@ export default function Home() {
           <div>
             <h2>Všechny nalezené cenové dealy</h2>
             <p>
-              Tohle je čistě cenové pořadí. Produkt bez materiálového enrichmentu ještě nepovažujeme za doporučení ke koupi.
+              30d minimum pochází z e-shopu. „Naše min“ vzniká až z opakovaných vlastních scanů a je proto dlouhodobě důležitější signál.
             </p>
           </div>
         </div>
 
         {products.length === 0 ? (
           <div className="empty">
-            {hosted ? "Čekáme na DB/worker sync." : "Spusť scan. Jakmile načteme produktové karty, objeví se tu první dnešní dealy."}
+            {hosted ? "Čekáme na první DB/worker sync." : "Spusť scan. Jakmile načteme produktové karty, objeví se tu první dnešní dealy."}
           </div>
         ) : (
           <div className="tableWrap">
@@ -271,10 +282,12 @@ export default function Home() {
               <thead>
                 <tr>
                   <th>Verdikt</th>
-                  <th>Deal score</th>
+                  <th>Deal</th>
+                  <th>Historie</th>
                   <th>Teď</th>
-                  <th>30d minimum</th>
-                  <th>Vs. minimum</th>
+                  <th>30d min</th>
+                  <th>Naše min</th>
+                  <th>Obs.</th>
                   <th>Produkt</th>
                 </tr>
               </thead>
@@ -283,13 +296,11 @@ export default function Home() {
                   <tr key={product.id}>
                     <td><span className="score">{verdictLabels[product.verdict]}</span></td>
                     <td>{product.dealScore === null ? "—" : Math.round(product.dealScore)}</td>
+                    <td>{product.historyScore == null ? "—" : Math.round(product.historyScore)}</td>
                     <td>{money(product.currentPriceCzk)}</td>
                     <td>{money(product.lowest30dCzk)}</td>
-                    <td>
-                      {product.ratioToLow === null
-                        ? "—"
-                        : `${Math.round((product.ratioToLow - 1) * 100)} %`}
-                    </td>
+                    <td>{money(product.observedMinCzk)}</td>
+                    <td>{product.observationCount ?? "—"}</td>
                     <td className="urlCell">
                       <a href={product.url} target="_blank" rel="noreferrer" title={product.text}>
                         {product.text}
