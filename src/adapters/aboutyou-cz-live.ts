@@ -114,7 +114,10 @@ function normalize(value: string) {
   return value.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
 }
 
-function readableText($: cheerio.CheerioAPI, node: cheerio.AnyNode) {
+function readableText(
+  $: cheerio.CheerioAPI,
+  node: Parameters<cheerio.CheerioAPI>[0],
+) {
   const clone = $(node).clone();
   clone.find("br").replaceWith(" ");
   clone.find("*").each((_, child) => {
