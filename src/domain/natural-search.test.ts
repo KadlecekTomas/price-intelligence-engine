@@ -52,6 +52,11 @@ test("parses thousands and excluded material", () => {
   assert.equal(intent.qualityPreferred, true);
 });
 
+test("parses decimal thousand shorthand without turning 1,5k into 5k", () => {
+  assert.equal(parseNaturalSearch("tričko do 1,5k").maxPriceCzk, 1500);
+  assert.equal(parseNaturalSearch("tričko do 1.5k").maxPriceCzk, 1500);
+});
+
 test("understands generic negative feature instead of requiring it", () => {
   const intent = parseNaturalSearch("černé tričko L do 500 Kč, bez limecku");
   assert.equal(intent.category, "tričko");
@@ -71,6 +76,11 @@ test("does not turn compact price syntax into a required keyword", () => {
   assert.deepEqual(intent.requiredTerms, []);
 });
 
+test("keeps half shoe sizes and supports XXS", () => {
+  assert.equal(parseNaturalSearch("bílé tenisky velikost 43,5").size, "43,5");
+  assert.equal(parseNaturalSearch("tričko XXS").size, "XXS");
+});
+
 test("supports common no-logo and no-print phrases", () => {
   const noLogo = parseNaturalSearch("černá mikina bez velkého loga");
   const noPrint = parseNaturalSearch("tričko bez potisku");
@@ -85,6 +95,15 @@ test("keeps unknown brand term as required text", () => {
   assert.equal(intent.color, "bílá");
   assert.equal(intent.size, "43");
   assert.ok(intent.requiredTerms.includes("nike"));
+});
+
+test("required brand terms match tokens, not arbitrary substrings", () => {
+  const intent = parseNaturalSearch("BOSS tričko");
+  const results = searchProducts([
+    product({ id: "boss", text: "BOSS černé tričko L" }),
+    product({ id: "embossed", text: "Tričko s embossed potiskem L" }),
+  ], intent);
+  assert.deepEqual(results.map((result) => result.product.id), ["boss"]);
 });
 
 test("filters and ranks matching products", () => {
