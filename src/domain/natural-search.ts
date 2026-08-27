@@ -117,14 +117,25 @@ function negativeFeatureAliases(name: string) {
   return NEGATIVE_FEATURES.find(([feature]) => feature === name)?.[1] ?? [name];
 }
 
-function parsePrice(text: string) {
+function normalizePriceText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("cs-CZ")
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parsePrice(raw: string) {
+  const text = normalizePriceText(raw);
   const thousands = text.match(/(?:do|pod|max(?:imalne)?)?\s*([0-9]+(?:[.,][0-9]+)?)\s*(?:tis(?:ic|ice|icu)?|k)\b/i);
   if (thousands?.[1]) {
     const value = Number(thousands[1].replace(",", ".")) * 1000;
     if (Number.isFinite(value)) return Math.round(value);
   }
 
-  const direct = text.match(/(?:do|pod|max(?:imalne)?)\s*([0-9][0-9 .]*)\s*(?:kc|korun)?/i);
+  const direct = text.match(/(?:do|pod|max(?:imalne)?)\s*([0-9][0-9 .]*)\s*(?:kc|czk|korun(?:y|a)?)?/i);
   if (direct?.[1]) {
     const value = Number(direct[1].replace(/[^0-9]/g, ""));
     if (Number.isFinite(value) && value >= 100) return value;
@@ -133,18 +144,34 @@ function parsePrice(text: string) {
   return null;
 }
 
+function normalizeSizeText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/\u00a0/g, " ")
+    .replace(/[^A-Z0-9.,/X ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function parseSize(raw: string) {
-  const normalized = fold(raw).toUpperCase();
+  const normalized = normalizeSizeText(raw);
   const tokens = normalized.split(/[^A-Z0-9]+/).filter(Boolean);
-  const apparelSizes = new Set(["XXXL", "XXL", "XL", "XS", "L", "M", "S"]);
+  const apparelSizes = new Set(["XXXL", "XXL", "XL", "XXS", "XS", "L", "M", "S"]);
   const apparel = tokens.find((token) => apparelSizes.has(token));
   if (apparel) return apparel;
 
   const waist = normalized.match(/(?:^|\s)(W\s?\d{2}(?:\s*[/X]\s*L?\d{2})?|W\s?\d{2}|L\s?\d{2})(?:\s|$)/);
-  if (waist?.[1]) return waist[1].replace(/\s+/g, "");
+  if (waist?.[1]) {
+    return waist[1]
+      .replace(/\s+/g, "")
+      .replace(/X(?=L?\d{2}$)/, "/")
+      .replace(/\/(\d{2})$/, "/L$1");
+  }
 
-  const shoe = normalized.match(/(?:VELIKOST|BOTY|TENISKY)\s*(3[5-9]|4[0-9]|5[0-2])(?:[.,]5)?(?:\s|$)/);
-  return shoe?.[1] ?? null;
+  const shoe = normalized.match(/(?:VELIKOST|BOTY|TENISKY)\s*((?:3[5-9]|4[0-9]|5[0-2])(?:[.,]5)?)(?:\s|$)/);
+  return shoe?.[1]?.replace(".", ",") ?? null;
 }
 
 function isExcludedMaterial(text: string, aliases: string[]) {
@@ -208,6 +235,10 @@ function isCompactPriceToken(term: string) {
     || /^\d+(?:[.,]\d+)?tis(?:ic|ice|icu)?$/i.test(term);
 }
 
+function containsRequiredTerm(haystack: string, term: string) {
+  return words(haystack).some((token) => token === fold(term));
+}
+
 export function parseNaturalSearch(raw: string): SearchIntent {
   const text = fold(raw);
   const categoryEntry = CATEGORIES.find(([, aliases]) => containsAlias(text, aliases));
@@ -221,7 +252,7 @@ export function parseNaturalSearch(raw: string): SearchIntent {
   }
 
   const { excludedTerms, negatedTokens } = parseExcludedTerms(text);
-  const maxPriceCzk = parsePrice(text);
+  const maxPriceCzk = parsePrice(raw);
   const size = parseSize(raw);
   const qualityPreferred = /kvalit|material|prijemn|vydrz|premium/.test(text);
   const sort: SearchSort = /nejlevnejs/.test(text)
@@ -239,7 +270,7 @@ export function parseNaturalSearch(raw: string): SearchIntent {
     .filter((term) => !isConsumedTerm(term))
     .filter((term) => !isCompactPriceToken(term))
     .filter((term) => !/^\d+$/.test(term))
-    .filter((term) => !/^(xxxl|xxl|xl|xs|l|m|s|w\d+|l\d+)$/.test(term));
+    .filter((term) => !/^(xxxl|xxl|xl|xxs|xs|l|m|s|w\d+|l\d+)$/.test(term));
 
   return {
     original: raw.trim(),
@@ -297,7 +328,7 @@ export function searchProducts(products: ScannedProduct[], intent: SearchIntent,
     if (intent.excludedMaterials.some((material) => containsAlias(haystack, materialAliases(material)))) continue;
     if (intent.excludedTerms.some((term) => containsAlias(haystack, negativeFeatureAliases(term)))) continue;
     if (normalizedSize && !words(haystack).some((token) => token === normalizedSize)) continue;
-    if (intent.requiredTerms.some((term) => !haystack.includes(term))) continue;
+    if (intent.requiredTerms.some((term) => !containsRequiredTerm(haystack, term))) continue;
 
     let searchScore = product.buyScore ?? product.dealScore ?? 45;
     const reasons: string[] = [];
