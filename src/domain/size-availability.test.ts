@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractAvailableSizes, normalizeSize, sizeAvailabilityFromText } from "@/domain/size-availability";
+import {
+  extractAvailableSizes,
+  normalizeSize,
+  sizeAvailabilityFromText,
+  textMatchesRequestedSize,
+} from "@/domain/size-availability";
 
 test("keeps W/L jeans sizes together", () => {
   const text = "Dostupné velikosti: W30/L30, W32/L30, W32/L32 Původně: 1 499 Kč";
@@ -24,4 +29,10 @@ test("handles apparel sizes including XXS", () => {
   const text = "Dostupné velikosti: XXS, XS, S, M, L, XL";
   assert.equal(sizeAvailabilityFromText(text, "XXS"), "yes");
   assert.equal(sizeAvailabilityFromText(text, "XXL"), "no");
+});
+
+test("does not infer S or M from brand names", () => {
+  assert.equal(textMatchesRequestedSize("LEVI'S tričko bez seznamu velikostí", "S"), false);
+  assert.equal(textMatchesRequestedSize("H&M tričko bez seznamu velikostí", "M"), false);
+  assert.equal(textMatchesRequestedSize("LEVI'S tričko velikost S", "S"), true);
 });
