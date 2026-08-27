@@ -30,11 +30,11 @@ const HTML = `
   </body>
 </html>`;
 
-test("maps natural category to current ABOUT YOU CZ URL", () => {
+test("maps category and verified color to current ABOUT YOU CZ URL", () => {
   const intent = parseNaturalSearch("černé tričko L do 1500");
   assert.equal(
     aboutYouCategoryUrl(intent),
-    "https://www.aboutyou.cz/c/muzi/obleceni/tricka-20324",
+    "https://www.aboutyou.cz/c/muzi/obleceni/tricka-20324?color=38932",
   );
 });
 
@@ -57,6 +57,15 @@ test("parses SSR product cards and canonicalizes product URLs", () => {
   assert.equal(tommy.lowest30dCzk, 345);
   assert.equal(tommy.url.includes("tracking"), false);
   assert.equal(tommy.text.includes("Dostupné velikosti: S, M, L, XL"), true);
+});
+
+test("annotates color when the source category is color-filtered", () => {
+  const products = parseAboutYouCategoryHtml(
+    HTML,
+    "https://www.aboutyou.cz/c/muzi/obleceni/tricka-20324?color=38932",
+    "černá",
+  );
+  assert.equal(products.every((product) => product.color === "černá"), true);
 });
 
 test("does not confuse multiple products in a broad parent container", () => {
