@@ -17,11 +17,15 @@ Marketingová sleva není totéž jako dobrá cena. Engine ukládá cenové snap
 - zachytávání aktuální JSON komunikace webu,
 - scoring endpointů podle signálů `products / prices / variants / stock / pagination`,
 - deal score podle ceny vůči e-shopem uváděnému 30dennímu minimu,
+- vlastní historické minimum, maximum a počet pozorování z `price_snapshots`,
+- historický score až od druhého vlastního snapshotu,
 - cílený PDP enrichment materiálu, střihu a barvy u nejlepšího shortlistu,
+- materiálový scoring podle typu oděvu: trička, úplety, denim, outerwear a sportswear,
 - lokální capture do `data/runs/`,
 - volitelný zápis do PostgreSQL přes `DATABASE_URL`,
 - Vercel-safe hosted dashboard, který Playwright nespouští serverless,
-- verzované Supabase schema v `supabase/migrations/`.
+- verzované Supabase schema v `supabase/migrations/`,
+- regresní testy domain scoringu v CI.
 
 Discovery používá standardní veřejný storefront; není postavené na obcházení autentizace, CAPTCHA nebo anti-bot mechanismů.
 
@@ -40,7 +44,7 @@ npm run scan
 - vypíše TOP kandidáty přímo v terminálu,
 - uloží `products.json`, `candidates.json` a další capture soubory do `data/runs/<runId>/`,
 - vytvoří `data/runs/<runId>/shopping-report.md`,
-- pokud je nastavený `DATABASE_URL`, uloží scan i do PostgreSQL jako další bod cenové historie.
+- pokud je nastavený `DATABASE_URL`, uloží scan do PostgreSQL a report načte i naše historické minimum a počet pozorování.
 
 Pro dashboard místo CLI:
 
@@ -60,6 +64,25 @@ DATABASE_URL=
 ```
 
 `DATABASE_URL` je volitelný. Bez něj funguje scanner dál čistě lokálně. S ním se snapshot zapíše do PostgreSQL/Supabase a hosted dashboard může číst stejná data.
+
+## Scoring
+
+Cenové signály držíme oddělené:
+
+- **Deal score** vychází z aktuální ceny vůči 30dennímu minimu publikovanému e-shopem.
+- **History score** vychází z našeho vlastního pozorovaného minima a aktivuje se až od 2 vlastních snapshotů.
+- **Material score** je category-aware. Například 100% polyester je silný negativní signál u běžného trička, ale u sportovního funkčního kusu ho automaticky netrestáme.
+- **Buy score** zatím kombinuje cenový deal a materiál. Vlastní historii zobrazujeme zvlášť, dokud nenashromáždíme dost pozorování pro spolehlivější váhování.
+
+## Testy
+
+```bash
+npm test
+npm run typecheck
+npm run build
+```
+
+Stejné kroky běží v GitHub Actions před mergem.
 
 ## Architektura
 
@@ -85,7 +108,7 @@ ABOUT YOU CZ / další shop
 src/
   adapters/        # shop-specific discovery / mapping
   cli/             # one-command lokální workflow
-  domain/          # společný datový model + deal score
+  domain/          # společný datový model + deal/material scoring
   lib/             # discovery + persistence
   app/             # dashboard + API
 supabase/migrations/
@@ -100,5 +123,5 @@ Další e-shop znamená nový adapter, ne fork aplikace.
 2. Identifikovat bulk PLP endpoint + pagination/cursor.
 3. Nahradit scrollování přímým, rate-limited katalogovým syncem.
 4. Doplnit stabilní product/variant IDs, velikosti a stock.
-5. Začít sbírat vlastní historická minima z `price_snapshots`.
+5. Sbírat vlastní cenovou historii a postupně zvýšit její váhu ve finálním buy score.
 6. Přidat druhý český e-shop a otestovat cross-shop matching.

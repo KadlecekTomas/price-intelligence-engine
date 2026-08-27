@@ -29,6 +29,11 @@ export type ScannedProduct = {
   materialScore: number | null;
   buyScore: number | null;
   qualitySignals: string[];
+  observedMinCzk?: number | null;
+  observedMaxCzk?: number | null;
+  observationCount?: number;
+  ratioToObservedMin?: number | null;
+  historyScore?: number | null;
 };
 
 export type DiscoveryState = {
