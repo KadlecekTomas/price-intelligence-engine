@@ -26,12 +26,12 @@ export type SearchResult = {
 
 const CATEGORIES: Array<[string, string[]]> = [
   ["tričko", ["tricko", "tricka", "tricek", "t-shirt", "tshirt"]],
-  ["mikina", ["mikina", "mikiny", "hoodie", "sweatshirt"]],
+  ["mikina", ["mikina", "mikinu", "mikiny", "hoodie", "sweatshirt"]],
   ["svetr", ["svetr", "svetry", "pulovr", "rolak"]],
   ["košile", ["kosile", "kosili", "shirt"]],
-  ["džíny", ["dziny", "dzin", "jeans", "denim"]],
+  ["džíny", ["dziny", "dzinu", "jeans", "denim"]],
   ["kalhoty", ["kalhoty", "kalhot", "trousers", "pants"]],
-  ["bunda", ["bunda", "bundy", "jacket", "parka"]],
+  ["bunda", ["bunda", "bundu", "bundy", "jacket", "parka"]],
   ["kabát", ["kabat", "kabaty", "coat"]],
   ["kraťasy", ["kratasy", "sortky", "shorts"]],
   ["polo", ["polo", "polotricko"]],
@@ -51,12 +51,12 @@ const COLORS: Array<[string, string[]]> = [
 ];
 
 const MATERIALS: Array<[string, string[]]> = [
-  ["bavlna", ["bavlna", "bavlny", "cotton"]],
-  ["vlna", ["vlna", "vlny", "wool"]],
+  ["bavlna", ["bavlna", "bavlny", "bavlnen", "cotton"]],
+  ["vlna", ["vlna", "vlny", "vlnen", "wool"]],
   ["merino", ["merino"]],
-  ["len", ["len", "lnene", "linen"]],
+  ["len", ["len", "lnene", "linene", "linen"]],
   ["kašmír", ["kasmir", "cashmere"]],
-  ["kůže", ["kuze", "kozeny", "leather"]],
+  ["kůže", ["kuze", "kozen", "leather"]],
   ["polyester", ["polyester"]],
   ["lyocell", ["lyocell", "tencel"]],
   ["modal", ["modal"]],
@@ -82,8 +82,22 @@ export function fold(value: string) {
     .trim();
 }
 
+function words(text: string) {
+  return fold(text).split(/[\s/,-]+/).filter(Boolean);
+}
+
+function tokenMatchesAlias(token: string, alias: string) {
+  const normalized = fold(alias);
+  return token === normalized || (normalized.length >= 4 && token.startsWith(normalized));
+}
+
 function containsAlias(text: string, aliases: string[]) {
-  return aliases.some((alias) => text.includes(fold(alias)));
+  const tokens = words(text);
+  return aliases.some((alias) => tokens.some((token) => tokenMatchesAlias(token, alias)));
+}
+
+function materialAliases(name: string) {
+  return MATERIALS.find(([material]) => material === name)?.[1] ?? [name];
 }
 
 function parsePrice(text: string) {
@@ -103,15 +117,32 @@ function parsePrice(text: string) {
 }
 
 function parseSize(raw: string) {
-  const upper = raw.toUpperCase();
-  const apparel = upper.match(/(?:VELIKOST\s*)?\b(XXXL|XXL|XL|XS|L|M|S)\b/);
-  if (apparel?.[1]) return apparel[1];
+  const normalized = fold(raw).toUpperCase();
+  const tokens = normalized.split(/[^A-Z0-9]+/).filter(Boolean);
+  const apparelSizes = new Set(["XXXL", "XXL", "XL", "XS", "L", "M", "S"]);
+  const apparel = tokens.find((token) => apparelSizes.has(token));
+  if (apparel) return apparel;
 
-  const waist = upper.match(/\b(W\s?\d{2}(?:\s*[/xX]\s*L?\d{2})?|W\s?\d{2}|L\s?\d{2})\b/);
+  const waist = normalized.match(/(?:^|\s)(W\s?\d{2}(?:\s*[/X]\s*L?\d{2})?|W\s?\d{2}|L\s?\d{2})(?:\s|$)/);
   if (waist?.[1]) return waist[1].replace(/\s+/g, "");
 
-  const shoe = upper.match(/(?:VELIKOST|BOTY|TENISKY)\s*(3[5-9]|4[0-9]|5[0-2])(?:[.,]5)?\b/);
+  const shoe = normalized.match(/(?:VELIKOST|BOTY|TENISKY)\s*(3[5-9]|4[0-9]|5[0-2])(?:[.,]5)?(?:\s|$)/);
   return shoe?.[1] ?? null;
+}
+
+function isExcludedMaterial(text: string, aliases: string[]) {
+  const tokens = words(text);
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (tokens[index] !== "bez") continue;
+    const window = tokens.slice(index + 1, index + 4);
+    if (aliases.some((alias) => window.some((token) => tokenMatchesAlias(token, alias)))) return true;
+  }
+  return false;
+}
+
+function isConsumedTerm(term: string) {
+  const aliases = [...CATEGORIES, ...COLORS, ...MATERIALS].flatMap(([, values]) => values);
+  return aliases.some((alias) => tokenMatchesAlias(term, alias));
 }
 
 export function parseNaturalSearch(raw: string): SearchIntent {
@@ -123,15 +154,7 @@ export function parseNaturalSearch(raw: string): SearchIntent {
   const materials: string[] = [];
   for (const [name, aliases] of MATERIALS) {
     if (!containsAlias(text, aliases)) continue;
-    const excluded = aliases.some((alias) =>
-      new RegExp(`\\bbez(?:\\s+[^ ]+){0,2}\\s+${fold(alias)}[a-z]*\\b`).test(text),
-    );
-    (excluded ? excludedMaterials : materials).push(name);
-  }
-
-  const consumed = new Set<string>();
-  for (const [, aliases] of [...CATEGORIES, ...COLORS, ...MATERIALS]) {
-    for (const alias of aliases) consumed.add(fold(alias));
+    (isExcludedMaterial(text, aliases) ? excludedMaterials : materials).push(name);
   }
 
   const maxPriceCzk = parsePrice(text);
@@ -145,11 +168,10 @@ export function parseNaturalSearch(raw: string): SearchIntent {
         ? "deal"
         : "recommended";
 
-  const requiredTerms = text
-    .split(" ")
+  const requiredTerms = words(text)
     .filter((term) => term.length >= 3)
     .filter((term) => !STOP_WORDS.has(term))
-    .filter((term) => !consumed.has(term))
+    .filter((term) => !isConsumedTerm(term))
     .filter((term) => !/^\d+$/.test(term))
     .filter((term) => !/^(xxxl|xxl|xl|xs|l|m|s|w\d+|l\d+)$/.test(term));
 
@@ -201,11 +223,11 @@ export function searchProducts(products: ScannedProduct[], intent: SearchIntent,
   for (const product of products) {
     const haystack = productHaystack(product);
     if (intent.maxPriceCzk !== null && product.currentPriceCzk > intent.maxPriceCzk) continue;
-    if (intent.categoryTerms.length > 0 && !intent.categoryTerms.some((term) => haystack.includes(term))) continue;
-    if (intent.colorTerms.length > 0 && !intent.colorTerms.some((term) => haystack.includes(term))) continue;
-    if (intent.materials.length > 0 && !intent.materials.some((material) => haystack.includes(fold(material)))) continue;
-    if (intent.excludedMaterials.some((material) => haystack.includes(fold(material)))) continue;
-    if (intent.size && !haystack.includes(fold(intent.size))) continue;
+    if (intent.categoryTerms.length > 0 && !containsAlias(haystack, intent.categoryTerms)) continue;
+    if (intent.colorTerms.length > 0 && !containsAlias(haystack, intent.colorTerms)) continue;
+    if (intent.materials.length > 0 && !intent.materials.some((material) => containsAlias(haystack, materialAliases(material)))) continue;
+    if (intent.excludedMaterials.some((material) => containsAlias(haystack, materialAliases(material)))) continue;
+    if (intent.size && !words(haystack).some((token) => token === fold(intent.size))) continue;
     if (intent.requiredTerms.some((term) => !haystack.includes(term))) continue;
 
     let searchScore = product.buyScore ?? product.dealScore ?? 45;
