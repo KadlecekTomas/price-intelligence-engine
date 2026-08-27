@@ -1,3 +1,4 @@
+import { textMatchesRequestedSize } from "@/domain/size-availability";
 import type { ScannedProduct } from "@/lib/discovery-state";
 
 export type SearchSort = "recommended" | "price" | "history" | "deal";
@@ -317,7 +318,6 @@ function recommendationFor(product: ScannedProduct): SearchResult["recommendatio
 
 export function searchProducts(products: ScannedProduct[], intent: SearchIntent, limit = 36): SearchResult[] {
   const results: SearchResult[] = [];
-  const normalizedSize = intent.size ? fold(intent.size) : null;
 
   for (const product of products) {
     const haystack = productHaystack(product);
@@ -327,7 +327,7 @@ export function searchProducts(products: ScannedProduct[], intent: SearchIntent,
     if (intent.materials.length > 0 && !intent.materials.some((material) => containsAlias(haystack, materialAliases(material)))) continue;
     if (intent.excludedMaterials.some((material) => containsAlias(haystack, materialAliases(material)))) continue;
     if (intent.excludedTerms.some((term) => containsAlias(haystack, negativeFeatureAliases(term)))) continue;
-    if (normalizedSize && !words(haystack).some((token) => token === normalizedSize)) continue;
+    if (intent.size && !textMatchesRequestedSize(product.text, intent.size)) continue;
     if (intent.requiredTerms.some((term) => !containsRequiredTerm(haystack, term))) continue;
 
     let searchScore = product.buyScore ?? product.dealScore ?? 45;
