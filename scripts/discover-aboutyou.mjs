@@ -1,16 +1,27 @@
 const ASSET_BASE = "https://assets.aboutstatic.com";
-const SERVICE_MAP = "/assets/service.grpc-mdxv0dCL-Wo1FjypW.js.map";
-const CALLER_MAPS = [
-  "/assets/Category.eager-Dx3Cbvep.js.map",
-  "/assets/useTokenBasedStreamPages-DT2r0hpa.js.map",
-  "/assets/config-CUqyJ_qf.js.map",
+const MAPS = [
+  "/assets/service.grpc-2Rm69sSU-CxdwnAEx.js.map",
+  "/assets/useIsInteractiveTileActive-CMd7-0Dn.js.map",
+];
+
+const NEEDLES = [
+  "GetProductStreamV2Request",
+  "GetProductStreamPageV2Request",
+  "encodeGetProductStreamV2Request",
+  "encodeGetProductStreamPageV2Request",
+  "decodeGetProductStreamV2Response",
+  "decodeGetProductStreamPageV2Response",
+  "GetProductStreamPageV2",
+  "GetProductStreamV2",
+  "nextState",
+  "CategoryStreamService",
 ];
 
 function compact(value) {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function aroundAll(text, needle, width = 1800, max = 3) {
+function aroundAll(text, needle, width = 2600, max = 2) {
   const lower = text.toLowerCase();
   const key = needle.toLowerCase();
   const output = [];
@@ -37,75 +48,29 @@ async function fetchText(url) {
   return response.text();
 }
 
-async function loadMap(path) {
-  const raw = await fetchText(new URL(path, ASSET_BASE).toString());
+const output = [];
+for (const path of MAPS) {
+  const url = new URL(path, ASSET_BASE).toString();
+  const raw = await fetchText(url);
   const map = JSON.parse(raw);
-  return {
-    path,
-    sources: Array.isArray(map.sources) ? map.sources : [],
-    contents: Array.isArray(map.sourcesContent) ? map.sourcesContent : [],
-  };
-}
+  const sources = Array.isArray(map.sources) ? map.sources : [];
+  const contents = Array.isArray(map.sourcesContent) ? map.sourcesContent : [];
 
-const output = { categoryStreamSources: [], callers: [] };
+  for (let index = 0; index < contents.length; index += 1) {
+    const content = typeof contents[index] === "string" ? contents[index] : "";
+    if (!content) continue;
+    const source = String(sources[index] ?? `source-${index}`);
+    const matchedNeedles = NEEDLES.filter((needle) => content.includes(needle));
+    if (!matchedNeedles.length) continue;
 
-const serviceMap = await loadMap(SERVICE_MAP);
-for (let index = 0; index < serviceMap.sources.length; index += 1) {
-  const source = String(serviceMap.sources[index] ?? "");
-  const content = typeof serviceMap.contents[index] === "string" ? serviceMap.contents[index] : "";
-  if (!content) continue;
-  if (!/category_page\/v1\/stream/i.test(source) && !/GetProductStream(?:Page)?V2/i.test(content)) continue;
-
-  const hits = {};
-  for (const needle of [
-    "export interface GetProductStreamV2Request",
-    "export interface GetProductStreamPageV2Request",
-    "createBaseGetProductStreamV2Request",
-    "createBaseGetProductStreamPageV2Request",
-    "encodeGetProductStreamV2Request",
-    "encodeGetProductStreamPageV2Request",
-    "decodeGetProductStreamPageV2Response",
-    "GetProductStreamV2",
-    "GetProductStreamPageV2",
-    "Pagination",
-    "nextState",
-  ]) {
-    const found = aroundAll(content, needle, 2200, 2);
-    if (found.length) hits[needle] = found;
-  }
-
-  output.categoryStreamSources.push({ source, hits });
-}
-
-for (const mapPath of CALLER_MAPS) {
-  try {
-    const map = await loadMap(mapPath);
-    for (let index = 0; index < map.sources.length; index += 1) {
-      const source = String(map.sources[index] ?? "");
-      const content = typeof map.contents[index] === "string" ? map.contents[index] : "";
-      if (!content) continue;
-      if (!/(GetProductStreamPageV2|GetProductStreamV2|CategoryStreamService|tadaridaUrl|createTransport)/i.test(content)) continue;
-      const hits = {};
-      for (const needle of [
-        "GetProductStreamV2",
-        "GetProductStreamPageV2",
-        "CategoryStreamService",
-        "tadaridaUrl",
-        "createTransport",
-        "nextState",
-        "token",
-      ]) {
-        const found = aroundAll(content, needle, 1800, 2);
-        if (found.length) hits[needle] = found;
-      }
-      output.callers.push({ map: mapPath, source, hits });
-      if (output.callers.length >= 12) break;
+    const snippets = {};
+    for (const needle of matchedNeedles) {
+      snippets[needle] = aroundAll(content, needle, 3200, 1);
     }
-  } catch (error) {
-    output.callers.push({ map: mapPath, error: error instanceof Error ? error.message : String(error) });
+    output.push({ map: path, source, matchedNeedles, snippets });
   }
 }
 
-console.log("AY_PROTO_SIGNAL_BEGIN");
-console.log(JSON.stringify(output));
-console.log("AY_PROTO_SIGNAL_END");
+console.log("AY_EXACT_PROTO_BEGIN");
+console.log(JSON.stringify(output.slice(0, 14)));
+console.log("AY_EXACT_PROTO_END");
