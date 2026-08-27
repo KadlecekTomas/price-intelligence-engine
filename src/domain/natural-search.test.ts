@@ -39,6 +39,7 @@ test("parses Czech apparel query", () => {
   assert.equal(intent.size, "L");
   assert.equal(intent.maxPriceCzk, 1500);
   assert.deepEqual(intent.materials, ["bavlna"]);
+  assert.deepEqual(intent.excludedTerms, []);
   assert.equal(intent.sort, "deal");
 });
 
@@ -47,7 +48,26 @@ test("parses thousands and excluded material", () => {
   assert.equal(intent.category, "mikina");
   assert.equal(intent.maxPriceCzk, 2000);
   assert.deepEqual(intent.excludedMaterials, ["polyester"]);
+  assert.deepEqual(intent.excludedTerms, []);
   assert.equal(intent.qualityPreferred, true);
+});
+
+test("understands generic negative feature instead of requiring it", () => {
+  const intent = parseNaturalSearch("černé tričko L do 500 Kč, bez limecku");
+  assert.equal(intent.category, "tričko");
+  assert.equal(intent.color, "černá");
+  assert.equal(intent.size, "L");
+  assert.equal(intent.maxPriceCzk, 500);
+  assert.deepEqual(intent.excludedTerms, ["límeček"]);
+  assert.equal(intent.requiredTerms.includes("limecku"), false);
+});
+
+test("supports common no-logo and no-print phrases", () => {
+  const noLogo = parseNaturalSearch("černá mikina bez velkého loga");
+  const noPrint = parseNaturalSearch("tričko bez potisku");
+  assert.deepEqual(noLogo.excludedTerms, ["logo"]);
+  assert.equal(noLogo.requiredTerms.includes("loga"), false);
+  assert.deepEqual(noPrint.excludedTerms, ["potisk"]);
 });
 
 test("keeps unknown brand term as required text", () => {
@@ -68,6 +88,17 @@ test("filters and ranks matching products", () => {
 
   assert.equal(results.length, 1);
   assert.equal(results[0]?.product.id, "p1");
+});
+
+test("excludes an explicitly collared product for bez limecku", () => {
+  const intent = parseNaturalSearch("černé tričko L do 500 bez limecku");
+  const results = searchProducts([
+    product({ id: "plain", currentPriceCzk: 499, text: "TOM TAILOR černé tričko velikost L", color: "černá" }),
+    product({ id: "polo", currentPriceCzk: 479, text: "Černé polotričko s límečkem velikost L", color: "černá" }),
+  ], intent);
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0]?.product.id, "plain");
 });
 
 test("flags fake sale when current price is far above 30d low", () => {

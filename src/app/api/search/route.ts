@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { fetchLiveAboutYouCatalog } from "@/adapters/aboutyou-cz-live";
-import { fold, parseNaturalSearch, searchProducts, type SearchResult } from "@/domain/natural-search";
+import {
+  fold,
+  parseNaturalSearch,
+  searchProducts,
+  type SearchIntent,
+  type SearchResult,
+} from "@/domain/natural-search";
 import { databaseConfigured, readLatestProducts } from "@/lib/database";
 import { discoveryState, type ScannedProduct } from "@/lib/discovery-state";
 import { readPublicProducts } from "@/lib/supabase-read";
@@ -65,6 +71,70 @@ function dedupeResults(results: SearchResult[], limit: number) {
     .slice(0, limit);
 }
 
+function buildNearMatches(
+  products: ScannedProduct[],
+  intent: SearchIntent,
+  limit: number,
+): SearchResult[] {
+  const relaxedBudget = intent.maxPriceCzk === null
+    ? null
+    : Math.ceil((intent.maxPriceCzk * 1.3) / 10) * 10;
+
+  const relaxedIntent: SearchIntent = {
+    ...intent,
+    color: null,
+    colorTerms: [],
+    size: null,
+    materials: [],
+    excludedMaterials: [],
+    excludedTerms: [],
+    maxPriceCzk: relaxedBudget,
+  };
+
+  return searchProducts(products, relaxedIntent, Math.max(24, limit * 3))
+    .filter((result) => !intent.size || sizeAvailability(result.product, intent.size) !== "no")
+    .map((result) => {
+      const reasons: string[] = [];
+
+      if (intent.maxPriceCzk !== null && result.product.currentPriceCzk > intent.maxPriceCzk) {
+        reasons.push(`${result.product.currentPriceCzk - intent.maxPriceCzk} Kč nad rozpočet`);
+      }
+
+      if (intent.size && sizeAvailability(result.product, intent.size) === "unknown") {
+        reasons.push(`velikost ${intent.size} ověř na detailu`);
+      }
+
+      if (intent.color && result.product.color !== intent.color) {
+        reasons.push(`barvu ${intent.color} ověř na detailu`);
+      }
+
+      if (intent.excludedTerms.length > 0) {
+        reasons.push(`bez ${intent.excludedTerms.join(" / ")} ověř na detailu`);
+      }
+
+      if (intent.excludedMaterials.length > 0) {
+        reasons.push("vyloučený materiál ověř na detailu");
+      }
+
+      return {
+        ...result,
+        searchScore: result.searchScore - 20,
+        recommendation: "CHECK" as const,
+        reasons: [...reasons, ...result.reasons].slice(0, 3),
+      };
+    })
+    .sort((a, b) => {
+      const aOverBudget = intent.maxPriceCzk === null
+        ? 0
+        : Math.max(0, a.product.currentPriceCzk - intent.maxPriceCzk);
+      const bOverBudget = intent.maxPriceCzk === null
+        ? 0
+        : Math.max(0, b.product.currentPriceCzk - intent.maxPriceCzk);
+      return aOverBudget - bOverBudget || b.searchScore - a.searchScore;
+    })
+    .slice(0, limit);
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const query = (url.searchParams.get("q") ?? "").slice(0, 500);
@@ -99,6 +169,7 @@ export async function GET(request: Request) {
   const desiredPersistedResults = Math.min(12, limit);
 
   let results = persistedResults;
+  let nearMatches: SearchResult[] = [];
   let source: "postgres" | "memory" | "live-aboutyou" | "hybrid" = persistedSource;
   let liveSourceUrl: string | null = null;
   let liveSourceUrls: string[] = [];
@@ -119,7 +190,7 @@ export async function GET(request: Request) {
       // The live adapter already narrows the public category by verified ABOUT YOU filters.
       // Search the union more permissively so partial/broad batches can fill the shortlist,
       // then explicitly mark any unverified constraint instead of pretending it is known.
-      const liveIntent = {
+      const liveIntent: SearchIntent = {
         ...intent,
         color: null,
         colorTerms: [],
@@ -167,11 +238,25 @@ export async function GET(request: Request) {
         );
       }
 
+      if (intent.excludedTerms.length > 0) {
+        warnings.push(`Podmínku „bez ${intent.excludedTerms.join(" / ")}“ umíme z produktové karty vyloučit, když je prvek výslovně uvedený; u ostatních kandidátů ji označujeme k ověření.`);
+        liveResults = liveResults.map((result) =>
+          downgradeForUnverifiedConstraint(
+            result,
+            `bez ${intent.excludedTerms.join(" / ")} ověř na detailu`,
+            5,
+          ),
+        );
+      }
+
       if (live.batchCount > 1) {
         warnings.push(`Pro větší pokrytí jsme spojili ${live.batchCount} veřejné výřezy stejné ABOUT YOU kategorie; přesné shody řadíme před kandidáty k ověření.`);
       }
 
       results = dedupeResults([...persistedResults, ...liveResults], limit);
+      if (results.length === 0) {
+        nearMatches = buildNearMatches(live.products, intent, Math.min(8, limit));
+      }
       source = persistedProducts.length > 0 ? "hybrid" : "live-aboutyou";
     } catch (error) {
       console.error("Live ABOUT YOU fallback failed", error);
@@ -185,12 +270,14 @@ export async function GET(request: Request) {
     query,
     intent,
     results,
+    nearMatches,
     source,
     scannedProducts: persistedProducts.length + liveProducts,
     persistedProducts: persistedProducts.length,
     liveProducts,
     liveBatches,
     resultCount: results.length,
+    nearMatchCount: nearMatches.length,
     liveSourceUrl,
     liveSourceUrls,
     liveFetchedAt,
