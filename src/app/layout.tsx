@@ -3,6 +3,7 @@ import "./globals.css";
 import "./production.css";
 import "./quick-filters.css";
 import "./market-search.css";
+import "./full-catalog.css";
 
 export const metadata: Metadata = {
   title: "Price Intelligence — nejlepší fashion dealy",
