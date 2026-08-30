@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  zalando-live:
+  sizeer-live:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -16,5 +16,5 @@ jobs:
         with:
           node-version: 22
       - run: npm install
-      - name: Verify Zalando CZ public search and PDP pricing
-        run: npm run probe:zalando-market
+      - name: Verify Sizeer CZ public collection and PDP pricing
+        run: npm run probe:sizeer-market
