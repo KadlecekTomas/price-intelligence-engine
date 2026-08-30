@@ -3,7 +3,7 @@ import {
   inspectAboutYouCategory,
   type AboutYouPartition,
 } from "@/lib/aboutyou-partitions";
-import { collectAboutYouFullCatalog } from "@/lib/aboutyou-full-sync";
+import { collectAboutYouFullCatalog, type AboutYouFullSyncResult } from "@/lib/aboutyou-full-sync";
 import { assessCatalogCoverage, coverageRatio } from "@/lib/catalog-coverage";
 import {
   finalizeCatalogRun,
@@ -49,12 +49,21 @@ function richerProduct(existing: ScannedProduct | undefined, candidate: ScannedP
   return candidate.text.length > existing.text.length ? candidate : existing;
 }
 
+function stepBudget(reportedCount: number | null, configuredFloor: number) {
+  if (!reportedCount) return configuredFloor;
+  // The live gate currently yields roughly 30 products per stream page. Budget
+  // for only 18 products/step plus headroom so a large terminal taxonomy leaf
+  // cannot be truncated merely because it has no deeper category partition.
+  const sizeDriven = Math.ceil(reportedCount / 18) + 40;
+  return Math.max(configuredFloor, Math.min(sizeDriven, 5_000));
+}
+
 async function main() {
   const dryRun = process.argv.includes("--dry-run");
   const startUrl = arg("url") ?? "https://www.aboutyou.cz/c/muzi-20202";
   const splitAbove = intArg("split-above", 850);
   const maxPartitions = intArg("max-partitions", 2_000);
-  const maxStepsPerPartition = intArg("max-steps", 350);
+  const configuredMaxSteps = intArg("max-steps", 350);
   const scrollDelayMs = intArg("delay", 450);
   const minimumCoverage = numberArg("min-coverage", 0.995);
   const runId = `aboutyou-partitioned-${new Date().toISOString().replace(/[:.]/g, "-")}`;
@@ -83,7 +92,7 @@ async function main() {
     if (!rootReportedCount) throw new Error("ABOUT YOU root did not expose a trustworthy reported catalog count");
     console.log(`Root reported catalog: ${count(rootReportedCount)}`);
 
-    console.log("Plánuji category/brand partitions…");
+    console.log("Plánuji category partitions…");
     const plan = await buildAboutYouPartitionPlan({
       startUrl,
       splitAbove,
@@ -92,7 +101,7 @@ async function main() {
         console.log(
           `[plan] ${new URL(inspection.url).pathname}${new URL(inspection.url).search}` +
           ` · expected ${count(inspection.reportedCount)}` +
-          ` · children ${inspection.childCategories.length} · brands ${inspection.brandPartitions.length}`,
+          ` · children ${inspection.childCategories.length} · visible brands ${inspection.brandPartitions.length}`,
         );
       },
     });
@@ -113,10 +122,10 @@ async function main() {
       if (!dryRun) await upsertPartitionState({ runId, partition, status: "running" });
 
       try {
-        const result = await collectAboutYouFullCatalog({
+        const collect = async (maxSteps: number): Promise<AboutYouFullSyncResult> => collectAboutYouFullCatalog({
           startUrl: partition.url,
           targetProducts: 200_000,
-          maxSteps: maxStepsPerPartition,
+          maxSteps,
           scrollDelayMs,
           minimumCoverage,
           checkpointEvery: 500,
@@ -128,16 +137,38 @@ async function main() {
               },
         });
 
-        for (const product of result.products) {
-          globalProducts.set(product.id, richerProduct(globalProducts.get(product.id), product));
-        }
-
-        const local = assessCatalogCoverage({
+        let partitionMaxSteps = stepBudget(partition.expectedCount, configuredMaxSteps);
+        console.log(`crawl budget: ${partitionMaxSteps.toLocaleString("cs-CZ")} steps for expected ${count(partition.expectedCount)}`);
+        let result = await collect(partitionMaxSteps);
+        let local = assessCatalogCoverage({
           observedProducts: result.products.length,
           reportedProducts: result.reportedProducts,
           stoppedBecause: result.stoppedBecause,
           minimumCoverage,
         });
+
+        // If the static planning count was missing/stale and the live page reveals
+        // a larger terminal category, retry once with a size-derived budget. This
+        // is deliberately bounded and only retries deterministic max-step truncation.
+        if (!local.publishable && result.stoppedBecause === "max-steps" && result.reportedProducts) {
+          const expanded = stepBudget(result.reportedProducts, partitionMaxSteps + 1);
+          if (expanded > partitionMaxSteps) {
+            console.warn(`↻ expanding ${partition.key} from ${partitionMaxSteps} to ${expanded} steps (live reported ${count(result.reportedProducts)})`);
+            partitionMaxSteps = expanded;
+            result = await collect(partitionMaxSteps);
+            local = assessCatalogCoverage({
+              observedProducts: result.products.length,
+              reportedProducts: result.reportedProducts,
+              stoppedBecause: result.stoppedBecause,
+              minimumCoverage,
+            });
+          }
+        }
+
+        for (const product of result.products) {
+          globalProducts.set(product.id, richerProduct(globalProducts.get(product.id), product));
+        }
+
         const status = local.publishable ? "complete" as const : "truncated" as const;
         if (status === "complete") completePartitions += 1;
         else truncatedPartitions += 1;
@@ -155,6 +186,7 @@ async function main() {
               stopReason: result.stoppedBecause,
               pageRequestsObserved: result.pageRequestsObserved,
               steps: result.steps,
+              maxStepsBudget: partitionMaxSteps,
             },
           });
         }
