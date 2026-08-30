@@ -12,6 +12,16 @@ test("parseReportedCatalogCount reads arbitrary nested men's category total", ()
   assert.equal(parseReportedCatalogCount(text), 4_812);
 });
 
+test("parseReportedCatalogCount reads deep leaf total without gender in heading", () => {
+  const text = "Trička s krátkým rukávem\n16 432\nZobrazit\nCena\nBarva";
+  assert.equal(parseReportedCatalogCount(text), 16_432);
+});
+
+test("parseReportedCatalogCount also handles flattened HTML text around filter control", () => {
+  const text = "Trička s krátkým rukávem 16 432 Zobrazit Cena Barva tracking 493 493";
+  assert.equal(parseReportedCatalogCount(text), 16_432);
+});
+
 test("parseReportedCatalogCount ignores larger unrelated six-digit values", () => {
   const text = "tracking 493 493 campaign\nMóda pro muže\n111 904\nZobrazit\n3 249 Kč";
   assert.equal(parseReportedCatalogCount(text), 111_904);
