@@ -25,13 +25,13 @@ export function parseReportedCatalogCount(text: string) {
     .replace(/ {2,}/g, " ");
   const token = catalogCountToken();
 
-  // ABOUT YOU renders the authoritative category total directly between the
-  // category heading (typically "... pro muže") and filter/sort controls.
-  // Prefer that semantic context over arbitrary large numbers embedded elsewhere
-  // in the page (campaign IDs, timers, tracking payloads, etc.).
+  // The category count is rendered immediately before ABOUT YOU's filter control
+  // ("Zobrazit") even for deep leaves whose heading no longer says "pro muže".
+  // This is much safer than selecting the largest six-digit number from the page.
   const contextualPatterns = [
-    new RegExp(`(?:[^0-9]{2,120}pro\\s+muže)[\\s\\n]*${token}[\\s\\n]*(?:Zobrazit|Třídění|Cena)`, "i"),
+    new RegExp(`${token}\\s*(?:Zobrazit|Třídění)`, "i"),
     new RegExp(`(?:Produkty|Výsledky|Položky)\\s*:?\\s*${token}`, "i"),
+    new RegExp(`(?:[^0-9]{2,120}pro\\s+muže)[\\s\\n]*${token}[\\s\\n]*(?:Zobrazit|Třídění|Cena)`, "i"),
   ];
 
   for (const pattern of contextualPatterns) {
