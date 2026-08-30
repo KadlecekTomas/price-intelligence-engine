@@ -205,14 +205,11 @@ export async function collectAboutYouFullCatalog(
       }
 
       const nextPageSignal = page
-        .waitForResponse((response) => PAGE_REQUEST.test(response.url()), { timeout: Math.max(1_500, scrollDelayMs * 4) })
+        .waitForResponse((response) => PAGE_REQUEST.test(response.url()), { timeout: Math.max(1_800, scrollDelayMs * 5) })
         .catch(() => null);
-      await page.mouse.wheel(0, 5_500);
-      await Promise.race([
-        nextPageSignal,
-        page.waitForTimeout(scrollDelayMs),
-      ]);
-      await page.waitForTimeout(Math.min(300, Math.max(80, Math.round(scrollDelayMs / 3))));
+      await page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)");
+      await nextPageSignal;
+      await page.waitForTimeout(Math.max(250, scrollDelayMs));
     }
 
     await flushCheckpoint(completedSteps, true);
