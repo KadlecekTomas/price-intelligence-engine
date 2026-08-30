@@ -1,7 +1,5 @@
-import type { MarketOffer } from "@/domain/market-offer";
+import type { MarketOffer, MarketVerification } from "@/domain/market-offer";
 import type { MarketSearchIntent } from "@/domain/market-search";
-
-export type MarketVerification = "live" | "catalog-only" | "blocked";
 
 export type MarketProviderSearchResult = {
   offers: MarketOffer[];
