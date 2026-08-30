@@ -15,6 +15,11 @@ on:
         required: true
         default: "850"
         type: string
+      max_partitions:
+        description: "Maximum category nodes inspected while building the partition plan"
+        required: true
+        default: "2000"
+        type: string
       max_steps:
         description: "Maximum lazy-load steps per leaf partition"
         required: true
@@ -50,6 +55,7 @@ jobs:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       SYNC_URL: ${{ inputs.start_url || 'https://www.aboutyou.cz/c/muzi-20202' }}
       SPLIT_ABOVE: ${{ inputs.split_above || '850' }}
+      MAX_PARTITIONS: ${{ inputs.max_partitions || '2000' }}
       SYNC_MAX_STEPS: ${{ inputs.max_steps || '350' }}
       SYNC_DELAY: ${{ inputs.scroll_delay_ms || '450' }}
       MIN_COVERAGE: ${{ inputs.minimum_coverage || '0.995' }}
@@ -68,6 +74,7 @@ jobs:
           npm run sync:aboutyou:partitioned --
           --url="$SYNC_URL"
           --split-above="$SPLIT_ABOVE"
+          --max-partitions="$MAX_PARTITIONS"
           --max-steps="$SYNC_MAX_STEPS"
           --delay="$SYNC_DELAY"
           --min-coverage="$MIN_COVERAGE"
