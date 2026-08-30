@@ -1,6 +1,10 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import MarketResults, {
+  type MarketIntentView,
+  type MarketPayloadView,
+} from "./MarketResults";
 import QuickFilters, { type QuickFilterState } from "./QuickFilters";
 
 type Product = {
@@ -42,11 +46,12 @@ type Result = {
 };
 
 type SearchResponse = {
+  mode: "discovery" | "market";
   query: string;
   intent: Intent;
   results: Result[];
   nearMatches?: Result[];
-  source: "postgres" | "memory" | "live-aboutyou" | "hybrid";
+  source: "postgres" | "memory" | "live-aboutyou" | "hybrid" | "market";
   scannedProducts: number;
   persistedProducts?: number;
   liveProducts?: number;
@@ -55,6 +60,8 @@ type SearchResponse = {
   nearMatchCount?: number;
   liveFetchedAt?: string | null;
   warnings?: string[];
+  marketIntent?: MarketIntentView;
+  market?: MarketPayloadView;
 };
 
 type Filters = QuickFilterState;
@@ -71,9 +78,9 @@ const EMPTY_FILTERS: Filters = {
 };
 
 const EXAMPLES = [
+  "puma speedcat nejlevnější",
+  "adidas samba 43 nejlevnější",
   "černé tričko L do 1 500 Kč, bavlna, top deal",
-  "kvalitní mikina do 2 tisíc bez polyesteru",
-  "Nike bílé tenisky velikost 43",
 ];
 
 const CATEGORY_OPTIONS = [
@@ -148,6 +155,7 @@ function productName(text: string) {
 
 function sourceLabel(data: SearchResponse | null) {
   if (!data) return "načítám";
+  if (data.source === "market") return "Footshop + Queens market";
   if (data.source === "live-aboutyou") return "ABOUT YOU live";
   if (data.source === "hybrid") return "index + ABOUT YOU live";
   if (data.source === "postgres") return "uložený index";
@@ -180,6 +188,15 @@ function intentChips(intent: Intent | null) {
     intent.sort === "history" ? "řadit podle historie" : null,
     intent.sort === "price" ? "nejlevnější" : null,
     intent.sort === "deal" ? "nejlepší deal" : null,
+  ].filter((item): item is string => Boolean(item));
+}
+
+function marketIntentChips(intent: MarketIntentView | undefined) {
+  if (!intent) return [];
+  return [
+    [intent.brand, intent.model].filter(Boolean).join(" "),
+    intent.size ? `velikost ${intent.size}` : null,
+    intent.sort === "cheapest" ? "nejlevnější na trhu" : "nejlepší shoda na trhu",
   ].filter((item): item is string => Boolean(item));
 }
 
@@ -254,7 +271,7 @@ export default function Home() {
     const timeout = window.setTimeout(() => {
       timedOut = true;
       controller.abort();
-    }, 15_000);
+    }, 25_000);
 
     const params = searchParams(nextQuery, nextFilters);
     if (historyMode !== "none") {
@@ -335,9 +352,12 @@ export default function Home() {
     void search(query.trim(), nextFilters);
   }
 
-  const chips = intentChips(data?.intent ?? null);
+  const isMarket = data?.mode === "market" && Boolean(data.market && data.marketIntent);
+  const chips = isMarket
+    ? marketIntentChips(data?.marketIntent)
+    : intentChips(data?.intent ?? null);
   const showingNearMatches = Boolean(
-    !loading && data && data.results.length === 0 && (data.nearMatches?.length ?? 0) > 0,
+    !isMarket && !loading && data && data.results.length === 0 && (data.nearMatches?.length ?? 0) > 0,
   );
   const displayResults = showingNearMatches ? (data?.nearMatches ?? []) : (data?.results ?? []);
   const resultCount = data?.resultCount ?? 0;
@@ -346,6 +366,8 @@ export default function Home() {
   const liveCount = data?.liveProducts ?? 0;
   const initialLoading = loading && data === null;
   const activeFilters = activeFilterCount(filters);
+  const marketSourceCount = data?.market?.sources.length ?? 0;
+  const marketHealthyCount = data?.market?.sources.filter((source) => source.status !== "failed").length ?? 0;
 
   return (
     <main className="shoppingShell">
@@ -354,32 +376,32 @@ export default function Home() {
           <div className="brandMark">PI</div>
           <div className="brandCopy">
             <strong>Price Intelligence</strong>
-            <span>CZ fashion deals</span>
+            <span>CZ fashion market search</span>
           </div>
-          <div className="shopStatus"><span /> ABOUT YOU CZ · první zdroj</div>
+          <div className="shopStatus"><span /> ABOUT YOU discovery · Footshop + Queens market</div>
         </nav>
 
         <div className="heroCopy">
-          <p className="eyebrow">CENA × HISTORIE × MATERIÁL</p>
+          <p className="eyebrow">CENA × TRH × HISTORIE × MATERIÁL</p>
           <h1>Najdi kus, který se fakt vyplatí.</h1>
           <p>
-            Začni jedním klikem přes rychlé filtry. Volný text nech na značku nebo detail typu „bez velkého loga“.
-            Přesné filtry mají vždy přednost, takže přesně víš, co engine hledá.
+            Napiš konkrétní model a engine automaticky přepne do market searchu, nebo použij rychlé filtry
+            pro obecné nakupování. Například „puma speedcat nejlevnější“ nebo „černá mikina L do 1 500 Kč“.
           </p>
         </div>
 
         <form className="searchBox" onSubmit={submit}>
-          <label htmlFor="shopping-query">Značka nebo speciální požadavek</label>
+          <label htmlFor="shopping-query">Co chceš najít?</label>
           <div className="searchRow">
             <input
               id="shopping-query"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Např. Nike, Levi's, bez velkého loga…"
+              placeholder="Např. adidas samba 43 nejlevnější nebo Nike bez velkého loga…"
               autoComplete="off"
             />
             <button type="submit" disabled={loading}>
-              {loading ? "Aktualizuji…" : "Najít nejlepší"}
+              {loading ? "Prohledávám…" : "Najít nejlepší"}
             </button>
           </div>
 
@@ -474,7 +496,7 @@ export default function Home() {
           </details>
 
           <div className="examples">
-            <span>Nebo zkus celou větu:</span>
+            <span>Zkus:</span>
             {EXAMPLES.map((example) => (
               <button key={example} type="button" onClick={() => useExample(example)}>
                 {example}
@@ -493,27 +515,41 @@ export default function Home() {
         </div>
         <div className="dataStatus">
           <strong>{resultCount}</strong>
-          <span>{countLabel(resultCount, "výsledek", "výsledky", "výsledků")}</span>
+          <span>{isMarket ? countLabel(resultCount, "živá nabídka", "živé nabídky", "živých nabídek") : countLabel(resultCount, "výsledek", "výsledky", "výsledků")}</span>
           <i />
-          <strong>{candidateCount}</strong>
-          <span>{countLabel(candidateCount, "kandidát", "kandidáti", "kandidátů")}</span>
+          <strong>{candidateCount.toLocaleString("cs-CZ")}</strong>
+          <span>{isMarket ? "katalogových položek prověřeno" : countLabel(candidateCount, "kandidát", "kandidáti", "kandidátů")}</span>
           <i />
           <span>{sourceLabel(data)}</span>
           {loading && data ? <b className="refreshingDot">obnovuji</b> : null}
         </div>
       </section>
 
-      <section className="coverageStrip">
-        <div><span>Uložený index</span><strong>{persistedCount.toLocaleString("cs-CZ")}</strong></div>
-        <div><span>Live doplnění</span><strong>{liveCount.toLocaleString("cs-CZ")}</strong></div>
-        <div>
-          <span>Poslední hledání</span>
-          <strong>{lastCompletedAt ? lastCompletedAt.toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}</strong>
-        </div>
-        <p>
-          Dokud neběží full-catalog synchronizace, číslo kandidátů je skutečné pokrytí tohoto dotazu — ne marketingové tvrzení o celém e-shopu.
-        </p>
-      </section>
+      {isMarket ? (
+        <section className="coverageStrip">
+          <div><span>Market zdroje</span><strong>{marketHealthyCount}/{marketSourceCount}</strong></div>
+          <div><span>Aktivní katalogy</span><strong>{candidateCount.toLocaleString("cs-CZ")}</strong></div>
+          <div>
+            <span>Poslední kontrola</span>
+            <strong>{lastCompletedAt ? lastCompletedAt.toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}</strong>
+          </div>
+          <p>
+            Market search porovnává jen aktuálně potvrzené nabídky. Staré vyprodané produktové stránky do ceny nezapočítáváme.
+          </p>
+        </section>
+      ) : (
+        <section className="coverageStrip">
+          <div><span>Uložený index</span><strong>{persistedCount.toLocaleString("cs-CZ")}</strong></div>
+          <div><span>Live doplnění</span><strong>{liveCount.toLocaleString("cs-CZ")}</strong></div>
+          <div>
+            <span>Poslední hledání</span>
+            <strong>{lastCompletedAt ? lastCompletedAt.toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}</strong>
+          </div>
+          <p>
+            Dokud neběží full-catalog ABOUT YOU synchronizace, číslo kandidátů je skutečné pokrytí tohoto dotazu — ne tvrzení o celém e-shopu.
+          </p>
+        </section>
+      )}
 
       {error ? (
         <div className="searchError" role="alert">
@@ -531,7 +567,11 @@ export default function Home() {
         </section>
       ) : null}
 
-      {!loading && data?.scannedProducts === 0 ? (
+      {isMarket && data?.market && data.marketIntent ? (
+        <MarketResults intent={data.marketIntent} market={data.market} loading={loading} />
+      ) : null}
+
+      {!isMarket && !loading && data?.scannedProducts === 0 ? (
         <section className="emptyCatalog">
           <p className="eyebrow">DATA NEJSOU DOSTUPNÁ</p>
           <h2>Vyhledávání teď nemá z čeho bezpečně vybírat.</h2>
@@ -551,57 +591,59 @@ export default function Home() {
         </section>
       ) : null}
 
-      <section className="resultsGrid" aria-busy={loading}>
-        {initialLoading
-          ? Array.from({ length: 8 }).map((_, index) => <article className="productCard skeleton" key={index} />)
-          : displayResults.map(({ product, recommendation, reasons }) => {
-              const badge = RECOMMENDATIONS[recommendation];
-              return (
-                <article className="productCard" key={product.id}>
-                  <div className="cardTop">
-                    <span className={`recommendation ${badge.className}`}>{badge.label}</span>
-                    <span className="shopName">ABOUT YOU</span>
-                  </div>
+      {!isMarket ? (
+        <section className="resultsGrid" aria-busy={loading}>
+          {initialLoading
+            ? Array.from({ length: 8 }).map((_, index) => <article className="productCard skeleton" key={index} />)
+            : displayResults.map(({ product, recommendation, reasons }) => {
+                const badge = RECOMMENDATIONS[recommendation];
+                return (
+                  <article className="productCard" key={product.id}>
+                    <div className="cardTop">
+                      <span className={`recommendation ${badge.className}`}>{badge.label}</span>
+                      <span className="shopName">ABOUT YOU</span>
+                    </div>
 
-                  <h2>{productName(product.text)}</h2>
-                  <div className="productDetails">
-                    {product.color ? <span>{product.color}</span> : null}
-                    {product.material ? <span>{product.material}</span> : null}
-                    {product.fit ? <span>{product.fit}</span> : null}
-                  </div>
+                    <h2>{productName(product.text)}</h2>
+                    <div className="productDetails">
+                      {product.color ? <span>{product.color}</span> : null}
+                      {product.material ? <span>{product.material}</span> : null}
+                      {product.fit ? <span>{product.fit}</span> : null}
+                    </div>
 
-                  <div className="priceBlock">
-                    <strong>{money(product.currentPriceCzk)}</strong>
-                    {product.originalPriceCzk && product.originalPriceCzk > product.currentPriceCzk ? (
-                      <del>{money(product.originalPriceCzk)}</del>
-                    ) : null}
-                  </div>
+                    <div className="priceBlock">
+                      <strong>{money(product.currentPriceCzk)}</strong>
+                      {product.originalPriceCzk && product.originalPriceCzk > product.currentPriceCzk ? (
+                        <del>{money(product.originalPriceCzk)}</del>
+                      ) : null}
+                    </div>
 
-                  <div className="metrics">
-                    <div><span>30denní reference</span><strong>{money(product.lowest30dCzk)}</strong></div>
-                    <div><span>Naše minimum</span><strong>{money(product.observedMinCzk)}</strong></div>
-                    <div><span>Deal score</span><strong>{product.dealScore == null ? "—" : Math.round(product.dealScore)}</strong></div>
-                    <div><span>Buy score</span><strong>{product.buyScore == null ? "—" : Math.round(product.buyScore)}</strong></div>
-                  </div>
+                    <div className="metrics">
+                      <div><span>30denní reference</span><strong>{money(product.lowest30dCzk)}</strong></div>
+                      <div><span>Naše minimum</span><strong>{money(product.observedMinCzk)}</strong></div>
+                      <div><span>Deal score</span><strong>{product.dealScore == null ? "—" : Math.round(product.dealScore)}</strong></div>
+                      <div><span>Buy score</span><strong>{product.buyScore == null ? "—" : Math.round(product.buyScore)}</strong></div>
+                    </div>
 
-                  {reasons.length > 0 ? (
-                    <ul className="reasons">
-                      {reasons.map((reason) => <li key={reason}>{reason}</li>)}
-                    </ul>
-                  ) : (
-                    <p className="noReason">Máme zatím málo vlastních pozorování — ber jako kandidáta k prověření.</p>
-                  )}
+                    {reasons.length > 0 ? (
+                      <ul className="reasons">
+                        {reasons.map((reason) => <li key={reason}>{reason}</li>)}
+                      </ul>
+                    ) : (
+                      <p className="noReason">Máme zatím málo vlastních pozorování — ber jako kandidáta k prověření.</p>
+                    )}
 
-                  <div className="cardFooter">
-                    <span>{product.observationCount ? `${product.observationCount}× naše pozorování` : "live kandidát"}</span>
-                    <a href={product.url} target="_blank" rel="noreferrer">Otevřít v obchodě ↗</a>
-                  </div>
-                </article>
-              );
-            })}
-      </section>
+                    <div className="cardFooter">
+                      <span>{product.observationCount ? `${product.observationCount}× naše pozorování` : "live kandidát"}</span>
+                      <a href={product.url} target="_blank" rel="noreferrer">Otevřít v obchodě ↗</a>
+                    </div>
+                  </article>
+                );
+              })}
+        </section>
+      ) : null}
 
-      {!loading && data && data.scannedProducts > 0 && data.results.length === 0 && !showingNearMatches ? (
+      {!isMarket && !loading && data && data.scannedProducts > 0 && data.results.length === 0 && !showingNearMatches ? (
         <section className="emptyResults">
           <h2>Nic přesně neprošlo zadáním.</h2>
           <p>Zkus ubrat jednu podmínku nebo vyčistit přesný filtr. Engine raději vrátí nulu než produkt, který zadání nesplňuje.</p>
@@ -610,7 +652,7 @@ export default function Home() {
 
       <footer className="shoppingFooter">
         <strong>Price Intelligence Engine</strong>
-        <span>ABOUT YOU je první adapter. Stejný search kontrakt použijeme pro další české e-shopy.</span>
+        <span>Discovery: ABOUT YOU · Market search: Footshop + Queens · další e-shopy přidáváme přes stejný provider kontrakt.</span>
       </footer>
     </main>
   );
