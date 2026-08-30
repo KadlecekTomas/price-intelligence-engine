@@ -78,15 +78,19 @@ async function readVisibleProductCards(page: Page) {
   return page.locator('a[href*="/p/"]').evaluateAll((nodes) =>
     nodes.map((node) => {
       const anchor = node as HTMLAnchorElement;
-      const normalize = (value: string | null | undefined) =>
-        (value ?? "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
-      const anchorText = normalize(anchor.textContent);
+      const anchorText = (anchor.textContent ?? "")
+        .replace(/\u00a0/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
       let firstPriceText: string | null = /Kč/.test(anchorText) ? anchorText : null;
       let preferredText: string | null = null;
       let current: HTMLElement | null = anchor;
 
       for (let depth = 0; depth < 8 && current; depth += 1) {
-        const candidate = normalize(current.innerText || current.textContent);
+        const candidate = (current.innerText || current.textContent || "")
+          .replace(/\u00a0/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
         const productLinkCount = current.querySelectorAll('a[href*="/p/"]').length;
         if (
           candidate.length > 0 &&
