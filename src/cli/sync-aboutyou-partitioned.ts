@@ -25,12 +25,16 @@ function arg(name: string) {
 }
 
 function intArg(name: string, fallback: number) {
-  const parsed = Number(arg(name));
+  const raw = arg(name);
+  if (raw === null || raw.trim() === "") return fallback;
+  const parsed = Number(raw);
   return Number.isFinite(parsed) ? Math.round(parsed) : fallback;
 }
 
 function numberArg(name: string, fallback: number) {
-  const parsed = Number(arg(name));
+  const raw = arg(name);
+  if (raw === null || raw.trim() === "") return fallback;
+  const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
@@ -134,13 +138,13 @@ async function main() {
             maxSteps,
             scrollDelayMs,
             minimumCoverage,
-            checkpointEvery: 500,
+            checkpointEvery: 5_000,
             headless: true,
             browser,
             onCheckpoint: dryRun
               ? undefined
               : async (products) => {
-                  await persistFullSyncProducts(run, products, 500);
+                  await persistFullSyncProducts(run, products, 1_000);
                 },
           });
 
