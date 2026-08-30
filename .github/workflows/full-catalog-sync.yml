@@ -1,0 +1,53 @@
+name: Full Catalog Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_url:
+        description: "Public ABOUT YOU CZ men's category URL"
+        required: true
+        default: "https://www.aboutyou.cz/c/muzi-20202"
+        type: string
+      target_products:
+        description: "Stop after this many unique parsed products"
+        required: true
+        default: "120000"
+        type: string
+      max_steps:
+        description: "Maximum lazy-load scroll steps"
+        required: true
+        default: "5000"
+        type: string
+      scroll_delay_ms:
+        description: "Delay between lazy-load scrolls (ms)"
+        required: true
+        default: "650"
+        type: string
+
+concurrency:
+  group: aboutyou-full-catalog-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SYNC_URL: ${{ inputs.start_url }}
+      SYNC_TARGET: ${{ inputs.target_products }}
+      SYNC_MAX_STEPS: ${{ inputs.max_steps }}
+      SYNC_DELAY: ${{ inputs.scroll_delay_ms }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+      - name: Validate sync secret
+        run: test -n "$DATABASE_URL" || (echo "DATABASE_URL GitHub secret is missing" && exit 1)
+      - name: Sync ABOUT YOU public catalog
+        run: npm run sync:aboutyou -- --url="$SYNC_URL" --target="$SYNC_TARGET" --max-steps="$SYNC_MAX_STEPS" --delay="$SYNC_DELAY"

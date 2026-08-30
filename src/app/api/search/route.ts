@@ -13,6 +13,10 @@ import { sizeAvailabilityFromText } from "@/domain/size-availability";
 import { databaseConfigured, readLatestProducts } from "@/lib/database";
 import { discoveryState, type ScannedProduct } from "@/lib/discovery-state";
 import { searchMarket } from "@/lib/market-search";
+import {
+  rankAllIndexedCandidates,
+  readPublicIndexedCandidates,
+} from "@/lib/public-index-search";
 import { readPublicProducts } from "@/lib/supabase-read";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +34,6 @@ function downgradeForUnverifiedConstraint(
   const reasons = result.reasons.includes(reason)
     ? result.reasons
     : [reason, ...result.reasons].slice(0, 3);
-
   return {
     ...result,
     searchScore: result.searchScore - penalty,
@@ -54,15 +57,28 @@ function liveConfidenceBonus(product: ScannedProduct) {
   return 0;
 }
 
-function dedupeResults(results: SearchResult[], limit: number) {
+function sortSearchResults(results: SearchResult[], intent: SearchIntent) {
+  return results.sort((a, b) => {
+    if (intent.sort === "price") return a.product.currentPriceCzk - b.product.currentPriceCzk;
+    if (intent.sort === "history") {
+      return (b.product.historyScore ?? -1) - (a.product.historyScore ?? -1)
+        || b.searchScore - a.searchScore;
+    }
+    if (intent.sort === "deal") {
+      return (b.product.dealScore ?? -1) - (a.product.dealScore ?? -1)
+        || b.searchScore - a.searchScore;
+    }
+    return b.searchScore - a.searchScore || a.product.currentPriceCzk - b.product.currentPriceCzk;
+  });
+}
+
+function dedupeResults(results: SearchResult[], intent: SearchIntent) {
   const byId = new Map<string, SearchResult>();
   for (const result of results) {
     const existing = byId.get(result.product.id);
     if (!existing || result.searchScore > existing.searchScore) byId.set(result.product.id, result);
   }
-  return [...byId.values()]
-    .sort((a, b) => b.searchScore - a.searchScore || a.product.currentPriceCzk - b.product.currentPriceCzk)
-    .slice(0, limit);
+  return sortSearchResults([...byId.values()], intent);
 }
 
 function buildNearMatches(
@@ -73,7 +89,6 @@ function buildNearMatches(
   const relaxedBudget = intent.maxPriceCzk === null
     ? null
     : Math.ceil((intent.maxPriceCzk * 1.3) / 10) * 10;
-
   const relaxedIntent: SearchIntent = {
     ...intent,
     color: null,
@@ -89,15 +104,12 @@ function buildNearMatches(
     .filter((result) => !intent.size || sizeAvailability(result.product, intent.size) !== "no")
     .map((result) => {
       const reasons: string[] = [];
-
       if (intent.maxPriceCzk !== null && result.product.currentPriceCzk > intent.maxPriceCzk) {
         reasons.push(`${result.product.currentPriceCzk - intent.maxPriceCzk} Kč nad rozpočet`);
       }
-
       if (intent.size && sizeAvailability(result.product, intent.size) === "unknown") {
         reasons.push(`velikost ${intent.size} ověř na detailu`);
       }
-
       if (intent.color) {
         if (result.product.color && result.product.color !== intent.color) {
           reasons.push(`barva je ${result.product.color}, hledáš ${intent.color}`);
@@ -105,19 +117,15 @@ function buildNearMatches(
           reasons.push(`barvu ${intent.color} ověř na detailu`);
         }
       }
-
       if (intent.materials.length > 0 && !productConfirmsMaterial(result.product, intent.materials)) {
         reasons.push(`materiál ${intent.materials.join(" / ")} ověř na detailu`);
       }
-
       if (intent.excludedTerms.length > 0) {
         reasons.push(`bez ${intent.excludedTerms.join(" / ")} ověř na detailu`);
       }
-
       if (intent.excludedMaterials.length > 0) {
         reasons.push("vyloučený materiál ověř na detailu");
       }
-
       return {
         ...result,
         searchScore: result.searchScore - 20,
@@ -126,12 +134,8 @@ function buildNearMatches(
       };
     })
     .sort((a, b) => {
-      const aOverBudget = intent.maxPriceCzk === null
-        ? 0
-        : Math.max(0, a.product.currentPriceCzk - intent.maxPriceCzk);
-      const bOverBudget = intent.maxPriceCzk === null
-        ? 0
-        : Math.max(0, b.product.currentPriceCzk - intent.maxPriceCzk);
+      const aOverBudget = intent.maxPriceCzk === null ? 0 : Math.max(0, a.product.currentPriceCzk - intent.maxPriceCzk);
+      const bOverBudget = intent.maxPriceCzk === null ? 0 : Math.max(0, b.product.currentPriceCzk - intent.maxPriceCzk);
       return aOverBudget - bOverBudget || b.searchScore - a.searchScore;
     })
     .slice(0, limit);
@@ -150,13 +154,16 @@ function structuredMaxPrice(value: string | null) {
   return Number.isFinite(parsed) && parsed >= 100 ? parsed : null;
 }
 
+function safeInteger(value: string | null, fallback: number, min: number, max: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(min, Math.min(Math.round(parsed), max)) : fallback;
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const query = (url.searchParams.get("q") ?? "").slice(0, 500);
-  const requestedLimit = Number(url.searchParams.get("limit") ?? "36");
-  const limit = Number.isFinite(requestedLimit)
-    ? Math.max(1, Math.min(Math.round(requestedLimit), 60))
-    : 36;
+  const limit = safeInteger(url.searchParams.get("limit"), 36, 1, 60);
+  const offset = safeInteger(url.searchParams.get("offset"), 0, 0, 50_000);
 
   const marketIntent = parseMarketSearchIntent(query);
   if (marketIntent.exactProduct) {
@@ -181,23 +188,28 @@ export async function GET(request: Request) {
       warnings.unshift("Při hledání konkrétního modelu používáme market režim. Kategorie, barva, materiál a quality filtr se zatím na market nabídky nepřenášejí; velikost a cenový limit ano.");
     }
 
+    const pageOffers = offers.slice(offset, offset + limit);
     return NextResponse.json({
       mode: "market",
       query,
       intent: naturalIntent,
       marketIntent,
-      market: {
-        ...market,
-        offers: offers.slice(0, limit),
-      },
+      market: { ...market, offers: pageOffers },
       results: [],
       nearMatches: [],
       source: "market",
       scannedProducts: catalogCount,
       persistedProducts: 0,
+      indexedProducts: 0,
+      candidateProducts: catalogCount,
       liveProducts: 0,
       liveBatches: 0,
-      resultCount: offers.length,
+      resultCount: pageOffers.length,
+      resultTotal: offers.length,
+      resultTotalExact: true,
+      offset,
+      limit,
+      hasMore: offset + pageOffers.length < offers.length,
       nearMatchCount: 0,
       liveSourceUrl: null,
       liveSourceUrls: [],
@@ -207,31 +219,56 @@ export async function GET(request: Request) {
   }
 
   const intent = applySearchParamOverrides(parseNaturalSearch(query), url.searchParams);
-  let persistedProducts = discoveryState.products;
+  let persistedProducts: ScannedProduct[] = [];
+  let persistedResults: SearchResult[] = [];
   let persistedSource: "postgres" | "memory" = "memory";
+  let indexedProducts = 0;
+  let candidateProducts = 0;
+  let indexTruncated = false;
+  let fullIndexReaderWorked = false;
+  const warnings: string[] = [];
 
-  if (databaseConfigured()) {
-    try {
-      persistedProducts = await readLatestProducts(500);
-      persistedSource = "postgres";
-    } catch (error) {
-      console.error("Search direct DB read failed", error);
+  try {
+    const indexed = await readPublicIndexedCandidates(intent, { maxCandidates: 25_000, batchSize: 1_000 });
+    persistedProducts = indexed.candidates;
+    persistedResults = rankAllIndexedCandidates(indexed.candidates, intent);
+    indexedProducts = indexed.indexTotal;
+    candidateProducts = indexed.candidateTotal;
+    indexTruncated = indexed.truncated;
+    fullIndexReaderWorked = indexed.indexTotal > 0;
+    if (fullIndexReaderWorked) persistedSource = "postgres";
+    if (indexed.truncated) {
+      warnings.push(`Hrubý indexový filtr našel ${indexed.candidateTotal.toLocaleString("cs-CZ")} kandidátů; tento request přesně vyhodnotil prvních 25 000. Počet shod je proto minimální, ne konečný.`);
     }
+  } catch (error) {
+    console.error("Full public index search failed", error);
   }
 
-  if (persistedSource === "memory") {
-    try {
-      persistedProducts = await readPublicProducts(500);
-      persistedSource = "postgres";
-    } catch (error) {
-      console.error("Search public Supabase read failed, falling back to memory", error);
+  if (!fullIndexReaderWorked) {
+    persistedProducts = discoveryState.products;
+    if (databaseConfigured()) {
+      try {
+        persistedProducts = await readLatestProducts(500);
+        persistedSource = "postgres";
+      } catch (error) {
+        console.error("Search direct DB fallback failed", error);
+      }
     }
+    if (persistedSource === "memory") {
+      try {
+        persistedProducts = await readPublicProducts(1000);
+        if (persistedProducts.length > 0) persistedSource = "postgres";
+      } catch (error) {
+        console.error("Search public Supabase fallback failed", error);
+      }
+    }
+    persistedResults = rankAllIndexedCandidates(persistedProducts, intent);
+    indexedProducts = persistedProducts.length;
+    candidateProducts = persistedProducts.length;
   }
 
-  const persistedResults = searchProducts(persistedProducts, intent, limit);
   const desiredPersistedResults = Math.min(12, limit);
-
-  let results = persistedResults;
+  let allResults = persistedResults;
   let nearMatches: SearchResult[] = [];
   let source: "postgres" | "memory" | "live-aboutyou" | "hybrid" = persistedSource;
   let liveSourceUrl: string | null = null;
@@ -240,9 +277,10 @@ export async function GET(request: Request) {
   let liveProducts = 0;
   let liveBatches = 0;
   let liveProductIds: string[] = [];
-  const warnings: string[] = [];
+  let resultTotalExact = fullIndexReaderWorked && !indexTruncated;
 
-  if (persistedResults.length < desiredPersistedResults) {
+  const indexBroadEnoughToTrust = fullIndexReaderWorked && indexedProducts >= 5_000;
+  if (!indexBroadEnoughToTrust && persistedResults.length < desiredPersistedResults) {
     try {
       const live = await fetchLiveAboutYouCatalog(intent);
       liveSourceUrl = live.sourceUrl;
@@ -269,69 +307,58 @@ export async function GET(request: Request) {
       if (intent.size) {
         liveResults = liveResults
           .filter((result) => sizeAvailability(result.product, intent.size!) !== "no")
-          .map((result) => {
-            const availability = sizeAvailability(result.product, intent.size!);
-            return availability === "unknown"
-              ? downgradeForUnverifiedConstraint(result, `velikost ${intent.size} ověř na detailu`, 4)
-              : result;
-          });
+          .map((result) => sizeAvailability(result.product, intent.size!) === "unknown"
+            ? downgradeForUnverifiedConstraint(result, `velikost ${intent.size} ověř na detailu`, 4)
+            : result);
       }
-
       if (intent.color) {
-        liveResults = liveResults.map((result) =>
-          result.product.color === intent.color
-            ? result
-            : downgradeForUnverifiedConstraint(result, `barvu ${intent.color} ověř na detailu`, 9),
-        );
+        liveResults = liveResults.map((result) => result.product.color === intent.color
+          ? result
+          : downgradeForUnverifiedConstraint(result, `barvu ${intent.color} ověř na detailu`, 9));
       }
-
       if (intent.materials.length > 0) {
-        liveResults = liveResults.map((result) =>
-          productConfirmsMaterial(result.product, intent.materials)
-            ? result
-            : downgradeForUnverifiedConstraint(result, "materiál ověř na detailu", 9),
-        );
+        liveResults = liveResults.map((result) => productConfirmsMaterial(result.product, intent.materials)
+          ? result
+          : downgradeForUnverifiedConstraint(result, "materiál ověř na detailu", 9));
       }
-
       if (intent.excludedMaterials.length > 0) {
         warnings.push("Vyloučený materiál nelze z veřejné produktové karty garantovat; živé kandidáty proto označujeme k prověření.");
-        liveResults = liveResults.map((result) =>
-          downgradeForUnverifiedConstraint(result, "složení materiálu ověř na detailu", 8),
-        );
+        liveResults = liveResults.map((result) => downgradeForUnverifiedConstraint(result, "složení materiálu ověř na detailu", 8));
       }
-
       if (intent.excludedTerms.length > 0) {
         warnings.push(`Podmínku „bez ${intent.excludedTerms.join(" / ")}“ umíme z produktové karty vyloučit, když je prvek výslovně uvedený; u ostatních kandidátů ji označujeme k ověření.`);
-        liveResults = liveResults.map((result) =>
-          downgradeForUnverifiedConstraint(
-            result,
-            `bez ${intent.excludedTerms.join(" / ")} ověř na detailu`,
-            5,
-          ),
-        );
+        liveResults = liveResults.map((result) => downgradeForUnverifiedConstraint(
+          result,
+          `bez ${intent.excludedTerms.join(" / ")} ověř na detailu`,
+          5,
+        ));
       }
-
       if (live.batchCount > 1) {
         warnings.push(`Pro větší pokrytí jsme spojili ${live.batchCount} veřejné výřezy stejné ABOUT YOU kategorie; přesnější výřezy dostávají vyšší skóre a neověřené podmínky vždy označujeme.`);
       }
 
-      results = dedupeResults([...persistedResults, ...liveResults], limit);
-      if (results.length === 0) {
-        nearMatches = buildNearMatches(live.products, intent, Math.min(8, limit));
-      }
+      allResults = dedupeResults([...persistedResults, ...liveResults], intent);
+      if (allResults.length === 0) nearMatches = buildNearMatches(live.products, intent, Math.min(8, limit));
       source = persistedProducts.length > 0 ? "hybrid" : "live-aboutyou";
+      resultTotalExact = false;
     } catch (error) {
       console.error("Live ABOUT YOU fallback failed", error);
-      if (persistedResults.length === 0) {
-        warnings.push("Živý storefront se teď nepodařilo načíst. Zkus vyhledávání znovu za chvíli.");
-      }
+      if (persistedResults.length === 0) warnings.push("Živý storefront se teď nepodařilo načíst. Zkus vyhledávání znovu za chvíli.");
     }
   }
 
-  const uniqueCandidateCount = new Set([
-    ...persistedProducts.map((product) => product.id),
-    ...liveProductIds,
-  ]).size;
+  if (indexBroadEnoughToTrust) {
+    warnings.push(`Hledání běží nad uloženým ABOUT YOU indexem s ${indexedProducts.toLocaleString("cs-CZ")} aktuálními položkami; live fallback už není omezením hlavního výsledku.`);
+  }
+
+  const resultTotal = allResults.length;
+  const results = allResults.slice(offset, offset + limit);
+  const uniqueCandidateCount = fullIndexReaderWorked
+    ? candidateProducts
+    : new Set([
+        ...persistedProducts.map((product) => product.id),
+        ...liveProductIds,
+      ]).size;
 
   return NextResponse.json({
     mode: "discovery",
@@ -341,10 +368,17 @@ export async function GET(request: Request) {
     nearMatches,
     source,
     scannedProducts: uniqueCandidateCount,
-    persistedProducts: persistedProducts.length,
+    persistedProducts: indexedProducts || persistedProducts.length,
+    indexedProducts,
+    candidateProducts,
     liveProducts,
     liveBatches,
     resultCount: results.length,
+    resultTotal,
+    resultTotalExact,
+    offset,
+    limit,
+    hasMore: offset + results.length < resultTotal || (!resultTotalExact && results.length === limit),
     nearMatchCount: nearMatches.length,
     liveSourceUrl,
     liveSourceUrls,

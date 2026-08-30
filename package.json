@@ -8,7 +8,8 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test src/**/*.test.ts",
-    "scan": "tsx src/cli/scan.ts"
+    "scan": "tsx src/cli/scan.ts",
+    "sync:aboutyou": "tsx src/cli/sync-aboutyou.ts"
   },
   "dependencies": {
     "cheerio": "^1.1.2",

@@ -54,9 +54,16 @@ type SearchResponse = {
   source: "postgres" | "memory" | "live-aboutyou" | "hybrid" | "market";
   scannedProducts: number;
   persistedProducts?: number;
+  indexedProducts?: number;
+  candidateProducts?: number;
   liveProducts?: number;
   liveBatches?: number;
   resultCount: number;
+  resultTotal?: number;
+  resultTotalExact?: boolean;
+  offset?: number;
+  limit?: number;
+  hasMore?: boolean;
   nearMatchCount?: number;
   liveFetchedAt?: string | null;
   warnings?: string[];
@@ -66,6 +73,7 @@ type SearchResponse = {
 
 type Filters = QuickFilterState;
 type HistoryMode = "push" | "replace" | "none";
+type SearchRequestOptions = { offset?: number; append?: boolean };
 
 const EMPTY_FILTERS: Filters = {
   category: "",
@@ -230,6 +238,7 @@ function searchParams(query: string, filters: Filters) {
 function pageUrl(params: URLSearchParams) {
   const visible = new URLSearchParams(params);
   visible.delete("limit");
+  visible.delete("offset");
   const query = visible.toString();
   return query ? `/?${query}` : "/";
 }
@@ -246,6 +255,34 @@ function activeFilterCount(filters: Filters) {
   ].filter(Boolean).length;
 }
 
+function uniqueById<T extends { id: string }>(items: T[]) {
+  const byId = new Map<string, T>();
+  for (const item of items) byId.set(item.id, item);
+  return [...byId.values()];
+}
+
+function appendSearchPage(current: SearchResponse, next: SearchResponse): SearchResponse {
+  if (current.mode !== next.mode) return next;
+  const results = uniqueById([...current.results, ...next.results].map((result) => ({
+    ...result,
+    id: result.product.id,
+  }))).map(({ id: _id, ...result }) => result as Result);
+
+  const market = current.market && next.market
+    ? {
+        ...next.market,
+        offers: uniqueById([...current.market.offers, ...next.market.offers]),
+      }
+    : next.market;
+
+  return {
+    ...next,
+    results,
+    market,
+    resultCount: next.mode === "market" ? (market?.offers.length ?? next.resultCount) : results.length,
+  };
+}
+
 export default function Home() {
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
@@ -260,6 +297,7 @@ export default function Home() {
     nextQuery: string,
     nextFilters: Filters,
     historyMode: HistoryMode = "push",
+    options: SearchRequestOptions = {},
   ) => {
     const sequence = sequenceRef.current + 1;
     sequenceRef.current = sequence;
@@ -274,7 +312,8 @@ export default function Home() {
     }, 25_000);
 
     const params = searchParams(nextQuery, nextFilters);
-    if (historyMode !== "none") {
+    if ((options.offset ?? 0) > 0) params.set("offset", String(options.offset));
+    if (historyMode !== "none" && !options.append) {
       const method = historyMode === "replace" ? "replaceState" : "pushState";
       window.history[method]({}, "", pageUrl(params));
     }
@@ -290,7 +329,7 @@ export default function Home() {
       if (!response.ok) throw new Error(`Vyhledávání selhalo (${response.status})`);
       const nextData = await response.json() as SearchResponse;
       if (sequence !== sequenceRef.current) return;
-      setData(nextData);
+      setData((current) => options.append && current ? appendSearchPage(current, nextData) : nextData);
       setLastCompletedAt(new Date());
     } catch (searchError) {
       if (sequence !== sequenceRef.current) return;
@@ -360,14 +399,25 @@ export default function Home() {
     !isMarket && !loading && data && data.results.length === 0 && (data.nearMatches?.length ?? 0) > 0,
   );
   const displayResults = showingNearMatches ? (data?.nearMatches ?? []) : (data?.results ?? []);
-  const resultCount = data?.resultCount ?? 0;
-  const candidateCount = data?.scannedProducts ?? 0;
-  const persistedCount = data?.persistedProducts ?? 0;
+  const resultTotal = data?.resultTotal ?? data?.resultCount ?? 0;
+  const resultTotalExact = data?.resultTotalExact ?? true;
+  const resultTotalText = `${resultTotalExact ? "" : "≥"}${resultTotal.toLocaleString("cs-CZ")}`;
+  const candidateCount = data?.candidateProducts ?? data?.scannedProducts ?? 0;
+  const persistedCount = data?.indexedProducts ?? data?.persistedProducts ?? 0;
   const liveCount = data?.liveProducts ?? 0;
+  const displayedCount = isMarket ? (data?.market?.offers.length ?? 0) : (data?.results.length ?? 0);
   const initialLoading = loading && data === null;
   const activeFilters = activeFilterCount(filters);
   const marketSourceCount = data?.market?.sources.length ?? 0;
   const marketHealthyCount = data?.market?.sources.filter((source) => source.status !== "failed").length ?? 0;
+  const nextBatchSize = data?.limit ?? 36;
+  const remaining = resultTotalExact ? Math.max(0, resultTotal - displayedCount) : nextBatchSize;
+  const nextBatchCount = Math.min(nextBatchSize, remaining || nextBatchSize);
+
+  function loadMore() {
+    if (!data?.hasMore || loading) return;
+    void search(query.trim(), filters, "none", { offset: displayedCount, append: true });
+  }
 
   return (
     <main className="shoppingShell">
@@ -514,11 +564,11 @@ export default function Home() {
           </div>
         </div>
         <div className="dataStatus">
-          <strong>{resultCount}</strong>
-          <span>{isMarket ? countLabel(resultCount, "živá nabídka", "živé nabídky", "živých nabídek") : countLabel(resultCount, "výsledek", "výsledky", "výsledků")}</span>
+          <strong className={resultTotalExact ? undefined : "approxTotal"}>{resultTotalText}</strong>
+          <span>{isMarket ? countLabel(resultTotal, "živá nabídka", "živé nabídky", "živých nabídek") : countLabel(resultTotal, "výsledek", "výsledky", "výsledků")}</span>
           <i />
           <strong>{candidateCount.toLocaleString("cs-CZ")}</strong>
-          <span>{isMarket ? "položek v načtených market zdrojích" : countLabel(candidateCount, "kandidát", "kandidáti", "kandidátů")}</span>
+          <span>{isMarket ? "položek v načtených market zdrojích" : "kandidátů po hrubém filtru"}</span>
           <i />
           <span>{sourceLabel(data)}</span>
           {loading && data ? <b className="refreshingDot">obnovuji</b> : null}
@@ -529,10 +579,7 @@ export default function Home() {
         <section className="coverageStrip">
           <div><span>Market zdroje</span><strong>{marketHealthyCount}/{marketSourceCount}</strong></div>
           <div><span>Načtené položky</span><strong>{candidateCount.toLocaleString("cs-CZ")}</strong></div>
-          <div>
-            <span>Poslední kontrola</span>
-            <strong>{lastCompletedAt ? lastCompletedAt.toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}</strong>
-          </div>
+          <div><span>Zobrazeno</span><strong>{displayedCount}/{resultTotalText}</strong></div>
           <p>
             Market search řadí jen cenově ověřené nabídky. Katalogová shoda bez ověřené ceny se zobrazí jako coverage, ne jako falešná nabídka.
           </p>
@@ -540,13 +587,12 @@ export default function Home() {
       ) : (
         <section className="coverageStrip">
           <div><span>Uložený index</span><strong>{persistedCount.toLocaleString("cs-CZ")}</strong></div>
-          <div><span>Live doplnění</span><strong>{liveCount.toLocaleString("cs-CZ")}</strong></div>
-          <div>
-            <span>Poslední hledání</span>
-            <strong>{lastCompletedAt ? lastCompletedAt.toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}</strong>
-          </div>
+          <div><span>Přesný filtr</span><strong>{candidateCount.toLocaleString("cs-CZ")}</strong></div>
+          <div><span>Zobrazeno</span><strong>{displayedCount}/{resultTotalText}</strong></div>
           <p>
-            Dokud neběží full-catalog ABOUT YOU synchronizace, číslo kandidátů je skutečné pokrytí tohoto dotazu — ne tvrzení o celém e-shopu.
+            {persistedCount >= 5_000
+              ? `Hledání běží nad uloženým katalogovým indexem. Live doplnění (${liveCount.toLocaleString("cs-CZ")}) je už jen fallback, ne hlavní zdroj výsledků.`
+              : "Index se ještě plní. Dokud není full-catalog synchronizace hotová, live storefront zůstává doplňkovým zdrojem a total může být minimální."}
           </p>
         </section>
       )}
@@ -640,6 +686,15 @@ export default function Home() {
                   </article>
                 );
               })}
+        </section>
+      ) : null}
+
+      {data?.hasMore && !showingNearMatches ? (
+        <section className="loadMoreBar" aria-live="polite">
+          <button className="loadMoreButton" type="button" onClick={loadMore} disabled={loading}>
+            {loading ? "Načítám další…" : resultTotalExact ? `Načíst dalších ${nextBatchCount}` : "Načíst další výsledky"}
+          </button>
+          <span>Zobrazeno {displayedCount.toLocaleString("cs-CZ")} z {resultTotalText} nalezených</span>
         </section>
       ) : null}
 

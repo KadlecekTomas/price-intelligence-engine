@@ -1,0 +1,47 @@
+name: Full Catalog Smoke
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  aboutyou-1k:
+    if: github.head_ref == 'feat/full-catalog-production'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Validate database connection (read only)
+        run: |
+          test -n "$DATABASE_URL" || (echo "DATABASE_URL repository secret is missing" && exit 1)
+          node --input-type=module <<'NODE'
+          import postgres from "postgres";
+          const sql = postgres(process.env.DATABASE_URL, {
+            max: 1,
+            prepare: false,
+            connect_timeout: 10,
+            idle_timeout: 2,
+            ssl: "require",
+          });
+          try {
+            const rows = await sql`select 1::integer as ok`;
+            if (rows[0]?.ok !== 1) throw new Error("Unexpected database response");
+            console.log("Database connection: OK");
+          } finally {
+            await sql.end({ timeout: 2 });
+          }
+          NODE
+      - run: npx playwright install --with-deps chromium
+      - name: Collect at least 1,000 public products
+        run: |
+          set -o pipefail
+          npm run sync:aboutyou -- --dry-run --target=1000 --max-steps=120 --delay=350 | tee /tmp/full-sync.log
+          awk '/^Produkty:/ { line=$0; gsub(/[^0-9]/, "", line); if ((line + 0) >= 1000) ok=1 } END { exit ok ? 0 : 1 }' /tmp/full-sync.log
