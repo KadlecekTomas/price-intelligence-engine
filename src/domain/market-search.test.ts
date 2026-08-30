@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  marketProductMatchesIntent,
   marketTitleMatchesIntent,
   marketUrlMatchesIntent,
   parseMarketSearchIntent,
@@ -50,4 +51,11 @@ test("matches compact model spelling in product URLs and titles", () => {
   );
   assert.equal(marketTitleMatchesIntent("adidas Originals NMD_R1 Core Black", intent), true);
   assert.equal(marketTitleMatchesIntent("adidas Samba OG", intent), false);
+});
+
+test("accepts brand from structured product data when title contains only the model", () => {
+  const intent = parseMarketSearchIntent("puma speedcat nejlevnější");
+  assert.equal(marketProductMatchesIntent("Speedcat OG", "Puma", intent), true);
+  assert.equal(marketProductMatchesIntent("Speedcat OG", "adidas", intent), false);
+  assert.equal(marketProductMatchesIntent("Palermo OG", "Puma", intent), false);
 });
