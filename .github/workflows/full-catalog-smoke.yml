@@ -20,6 +20,13 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: Collect at least 1,000 public products
         run: |
+          set +e
           set -o pipefail
           npm run sync:aboutyou -- --dry-run --target=1000 --max-steps=120 --delay=350 | tee /tmp/full-sync.log
-          grep -Eq 'Produkty: (1[ .]?000|[1-9][0-9 .]{3,})' /tmp/full-sync.log
+          sync_status=${PIPESTATUS[0]}
+          if [ "$sync_status" -eq 0 ] && grep -Eq 'Produkty: (1[ .]?000|[1-9][0-9 .]{3,})' /tmp/full-sync.log; then
+            exit 0
+          fi
+          echo "1k threshold not reached; collecting public pagination diagnostics..."
+          node scripts/probe-aboutyou-pagination.mjs
+          exit 1
