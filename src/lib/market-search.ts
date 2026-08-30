@@ -1,12 +1,14 @@
 import { aboutYouCzMarketProvider } from "@/adapters/market/aboutyou-cz";
 import { footshopCzMarketProvider } from "@/adapters/market/footshop-cz";
 import { queensCzMarketProvider } from "@/adapters/market/queens-cz";
+import { zalandoCzMarketProvider } from "@/adapters/market/zalando-cz";
 import type { MarketProvider } from "@/adapters/market/types";
 import type { MarketOffer, MarketSearchResult, MarketSourceStatus } from "@/domain/market-offer";
 import type { MarketSearchIntent } from "@/domain/market-search";
 
 export const MARKET_PROVIDERS: MarketProvider[] = [
   aboutYouCzMarketProvider,
+  zalandoCzMarketProvider,
   footshopCzMarketProvider,
   queensCzMarketProvider,
 ];
