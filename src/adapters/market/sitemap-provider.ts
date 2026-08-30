@@ -159,16 +159,19 @@ export function createSitemapMarketProvider(config: SitemapProviderConfig): Mark
     id: config.id,
     name: config.name,
     async search(intent) {
-      if (!intent.exactProduct) return { offers: [], candidateCount: 0, warning: null };
+      if (!intent.exactProduct) {
+        return { offers: [], catalogCount: 0, candidateCount: 0, warning: null };
+      }
 
       const urls = await fetchSitemapUrls(config);
+      const catalogCount = urls.length;
       const candidates = findSitemapCandidateUrls(
         urls,
         intent,
         config.maxPdpCandidates ?? 12,
       );
       if (candidates.length === 0) {
-        return { offers: [], candidateCount: 0, warning: null };
+        return { offers: [], catalogCount, candidateCount: 0, warning: null };
       }
 
       const settled = await Promise.allSettled(
@@ -183,6 +186,7 @@ export function createSitemapMarketProvider(config: SitemapProviderConfig): Mark
       const failures = settled.filter((result) => result.status === "rejected").length;
       return {
         offers,
+        catalogCount,
         candidateCount: candidates.length,
         warning: failures > 0
           ? `${failures} produktových detailů z ${config.name} se nepodařilo ověřit.`
