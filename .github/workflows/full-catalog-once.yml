@@ -35,9 +35,9 @@ jobs:
           --split-above="850"
           --max-partitions="2000"
           --max-steps="350"
-          --delay="450"
+          --delay="250"
           --min-coverage="0.995"
-          --concurrency="4"
+          --concurrency="6"
       - name: Verify active publication in PostgreSQL
         run: |
           node --input-type=module <<'NODE'
@@ -45,7 +45,7 @@ jobs:
           const sql = postgres(process.env.DATABASE_URL, {
             max: 1,
             prepare: false,
-            connect_timeout: 15,
+            connect_timeout: 20,
             idle_timeout: 3,
             ssl: "require",
           });
