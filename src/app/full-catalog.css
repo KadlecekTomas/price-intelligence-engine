@@ -1,0 +1,57 @@
+.loadMoreBar {
+  width: min(100%, 1240px);
+  margin: 18px auto 42px;
+  padding: 18px 20px;
+  border: 1px solid rgba(145, 169, 196, 0.18);
+  border-radius: 18px;
+  background: rgba(16, 23, 32, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.loadMoreBar span {
+  color: #8f9baa;
+  font-size: 13px;
+}
+
+.loadMoreButton {
+  appearance: none;
+  border: 1px solid rgba(173, 255, 86, 0.52);
+  border-radius: 999px;
+  background: #a9ff55;
+  color: #071006;
+  padding: 12px 22px;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 140ms ease, opacity 140ms ease;
+}
+
+.loadMoreButton:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.loadMoreButton:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.dataStatus .approxTotal {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+@media (max-width: 720px) {
+  .loadMoreBar {
+    margin: 14px 16px 32px;
+    width: auto;
+  }
+
+  .loadMoreButton {
+    width: 100%;
+  }
+}
