@@ -1,10 +1,10 @@
 import { aboutYouCzMarketProvider } from "@/adapters/market/aboutyou-cz";
 import { footshopCzMarketProvider } from "@/adapters/market/footshop-cz";
 import { queensCzMarketProvider } from "@/adapters/market/queens-cz";
-import { zalandoCzMarketProvider } from "@/adapters/market/zalando-cz";
+import { sizeerCzMarketProvider } from "@/adapters/market/sizeer-cz";
 import type { MarketProvider } from "@/adapters/market/types";
 
-export type ShopIntegrationState = "active" | "candidate";
+export type ShopIntegrationState = "active" | "partial" | "candidate";
 export type ShopTrackingMode = "full-catalog" | "on-demand";
 
 export type ShopRegistryEntry = {
@@ -38,36 +38,36 @@ export const SHOP_REGISTRY: ShopRegistryEntry[] = [
     name: "Zalando",
     market: "CZ",
     currency: "CZK",
-    state: "active",
+    state: "candidate",
     trackingMode: "on-demand",
     fullCatalog: false,
     priceRefreshMinutes: null,
-    marketProvider: zalandoCzMarketProvider,
-    note: "Public catalog search plus live PDP verification; no internal API access.",
+    marketProvider: null,
+    note: "Public pages exist, but automated GitHub-runner search verification currently returns HTTP 403; no price is asserted.",
   },
   {
     id: "footshop-cz",
     name: "Footshop",
     market: "CZ",
     currency: "CZK",
-    state: "active",
+    state: "partial",
     trackingMode: "on-demand",
     fullCatalog: false,
     priceRefreshMinutes: null,
     marketProvider: footshopCzMarketProvider,
-    note: "Product sitemap discovery with PDP verification when the storefront allows it.",
+    note: "Product sitemap discovery works; PDP verification can be blocked by the storefront, so unverified prices are never asserted.",
   },
   {
     id: "queens-cz",
     name: "Queens",
     market: "CZ",
     currency: "CZK",
-    state: "active",
+    state: "partial",
     trackingMode: "on-demand",
     fullCatalog: false,
     priceRefreshMinutes: null,
     marketProvider: queensCzMarketProvider,
-    note: "Product sitemap discovery with PDP verification when the storefront allows it.",
+    note: "Product sitemap discovery works; PDP verification can be blocked by the storefront, so unverified prices are never asserted.",
   },
   {
     id: "sizeer-cz",
@@ -78,8 +78,8 @@ export const SHOP_REGISTRY: ShopRegistryEntry[] = [
     trackingMode: "on-demand",
     fullCatalog: false,
     priceRefreshMinutes: null,
-    marketProvider: null,
-    note: "Public catalog/PDP confirmed; provider transport still needs a repeatable live gate.",
+    marketProvider: sizeerCzMarketProvider,
+    note: "Public collection/PDP provider implemented; promotion to active requires the live smoke gate to pass.",
   },
   {
     id: "eobuv-cz",
@@ -120,12 +120,15 @@ export const SHOP_REGISTRY: ShopRegistryEntry[] = [
 ];
 
 export const ACTIVE_MARKET_PROVIDERS = SHOP_REGISTRY.flatMap((shop) =>
-  shop.state === "active" && shop.marketProvider ? [shop.marketProvider] : [],
+  (shop.state === "active" || shop.state === "partial") && shop.marketProvider
+    ? [shop.marketProvider]
+    : [],
 );
 
 export function shopIntegrationSummary() {
   return {
     active: SHOP_REGISTRY.filter((shop) => shop.state === "active").length,
+    partial: SHOP_REGISTRY.filter((shop) => shop.state === "partial").length,
     candidates: SHOP_REGISTRY.filter((shop) => shop.state === "candidate").length,
     fullCatalog: SHOP_REGISTRY.filter((shop) => shop.fullCatalog).length,
     onDemand: SHOP_REGISTRY.filter((shop) => shop.trackingMode === "on-demand").length,
