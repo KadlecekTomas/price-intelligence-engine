@@ -5,6 +5,7 @@ import {
   extractAboutYouPartitionLinks,
   inspectAboutYouCategoryHtml,
   partitionKey,
+  selectPartitionChildren,
 } from "@/lib/aboutyou-partitions";
 
 test("root category extracts only direct men's category children", () => {
@@ -21,6 +22,25 @@ test("root category extracts only direct men's category children", () => {
   assert.deepEqual(inspection.childCategories, [
     "https://www.aboutyou.cz/c/muzi/boty-20215",
     "https://www.aboutyou.cz/c/muzi/obleceni-20290",
+  ]);
+});
+
+test("root planning keeps product taxonomy roots and drops overlapping merchandising views", () => {
+  const root = "https://www.aboutyou.cz/c/muzi-20202";
+  const selected = selectPartitionChildren(root, [
+    "https://www.aboutyou.cz/c/muzi/vyprodej-32599",
+    "https://www.aboutyou.cz/c/muzi/obleceni-20290",
+    "https://www.aboutyou.cz/c/muzi/boty-20215",
+    "https://www.aboutyou.cz/c/muzi/sport-20922",
+    "https://www.aboutyou.cz/c/muzi/doplnky-20211",
+    "https://www.aboutyou.cz/c/muzi/streetwear-20999",
+    "https://www.aboutyou.cz/c/muzi/premium-20201",
+  ]);
+  assert.deepEqual(selected, [
+    "https://www.aboutyou.cz/c/muzi/obleceni-20290",
+    "https://www.aboutyou.cz/c/muzi/boty-20215",
+    "https://www.aboutyou.cz/c/muzi/sport-20922",
+    "https://www.aboutyou.cz/c/muzi/doplnky-20211",
   ]);
 });
 
