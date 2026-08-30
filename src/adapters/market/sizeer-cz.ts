@@ -12,6 +12,7 @@ import type { MarketProvider } from "@/adapters/market/types";
 const SHOP_ID = "sizeer-cz";
 const SHOP_NAME = "Sizeer";
 const ORIGIN = "https://sizeer.cz";
+const REQUEST_TIMEOUT_MS = 20_000;
 
 const HEADERS = {
   Accept: "text/html,application/xhtml+xml",
@@ -101,7 +102,7 @@ async function fetchOffer(url: string, intent: MarketSearchIntent): Promise<Offe
   const response = await fetch(url, {
     headers: HEADERS,
     cache: "no-store",
-    signal: AbortSignal.timeout(9_000),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -173,7 +174,7 @@ export const sizeerCzMarketProvider: MarketProvider = {
     const response = await fetch(collectionUrl, {
       headers: HEADERS,
       cache: "no-store",
-      signal: AbortSignal.timeout(9_000),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (response.status === 404) {
       return {
