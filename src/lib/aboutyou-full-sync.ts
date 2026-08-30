@@ -184,9 +184,13 @@ export async function collectAboutYouFullCatalog(
         const parsed = parseAboutYouCard(url, card.text);
         if (!parsed) continue;
         parsed.qualitySignals.push("ABOUT YOU full-sync: public product stream");
-        const selected = richerProduct(products.get(url), parsed);
-        products.set(url, selected);
-        dirty.set(url, selected);
+
+        const existing = products.get(url);
+        const selected = richerProduct(existing, parsed);
+        if (!existing || selected !== existing) {
+          products.set(url, selected);
+          dirty.set(url, selected);
+        }
       }
 
       stagnantSteps = products.size === previousCount ? stagnantSteps + 1 : 0;
@@ -205,11 +209,18 @@ export async function collectAboutYouFullCatalog(
       }
 
       const nextPageSignal = page
-        .waitForResponse((response) => PAGE_REQUEST.test(response.url()), { timeout: Math.max(1_800, scrollDelayMs * 5) })
+        .waitForResponse((response) => PAGE_REQUEST.test(response.url()), { timeout: Math.max(2_500, scrollDelayMs * 6) })
         .catch(() => null);
-      await page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)");
-      await nextPageSignal;
-      await page.waitForTimeout(Math.max(250, scrollDelayMs));
+      const lastProduct = page.locator('a[href*="/p/"]').last();
+      if (await lastProduct.count()) {
+        await lastProduct.scrollIntoViewIfNeeded().catch(() => undefined);
+      }
+      await page.keyboard.press("End").catch(() => undefined);
+      await Promise.race([
+        nextPageSignal,
+        page.waitForTimeout(Math.max(1_200, scrollDelayMs * 3)),
+      ]);
+      await page.waitForTimeout(Math.max(650, scrollDelayMs));
     }
 
     await flushCheckpoint(completedSteps, true);
