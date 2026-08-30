@@ -1,6 +1,5 @@
-import type { MarketVerification } from "@/adapters/market/types";
-
 export type OfferAvailability = "in_stock" | "out_of_stock" | "unknown";
+export type MarketVerification = "live" | "catalog-only" | "blocked";
 
 export type MarketOffer = {
   id: string;
