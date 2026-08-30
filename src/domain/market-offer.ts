@@ -27,6 +27,7 @@ export type MarketSourceStatus = {
   shopId: string;
   shopName: string;
   status: "ok" | "partial" | "failed";
+  catalogCount: number;
   candidateCount: number;
   offerCount: number;
   durationMs: number;
