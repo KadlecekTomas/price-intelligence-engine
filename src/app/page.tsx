@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import QuickFilters, { type QuickFilterState } from "./QuickFilters";
 
 type Product = {
   id: string;
@@ -56,16 +57,7 @@ type SearchResponse = {
   warnings?: string[];
 };
 
-type Filters = {
-  category: string;
-  color: string;
-  size: string;
-  maxPrice: string;
-  material: string;
-  sort: Intent["sort"];
-  quality: boolean;
-};
-
+type Filters = QuickFilterState;
 type HistoryMode = "push" | "replace" | "none";
 
 const EMPTY_FILTERS: Filters = {
@@ -225,6 +217,18 @@ function pageUrl(params: URLSearchParams) {
   return query ? `/?${query}` : "/";
 }
 
+function activeFilterCount(filters: Filters) {
+  return [
+    filters.category,
+    filters.color,
+    filters.size,
+    filters.maxPrice,
+    filters.material,
+    filters.sort !== "recommended" ? filters.sort : "",
+    filters.quality ? "quality" : "",
+  ].filter(Boolean).length;
+}
+
 export default function Home() {
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
@@ -326,6 +330,11 @@ export default function Home() {
     void search("", EMPTY_FILTERS);
   }
 
+  function applyQuickFilters(nextFilters: Filters) {
+    setFilters(nextFilters);
+    void search(query.trim(), nextFilters);
+  }
+
   const chips = intentChips(data?.intent ?? null);
   const showingNearMatches = Boolean(
     !loading && data && data.results.length === 0 && (data.nearMatches?.length ?? 0) > 0,
@@ -336,6 +345,7 @@ export default function Home() {
   const persistedCount = data?.persistedProducts ?? 0;
   const liveCount = data?.liveProducts ?? 0;
   const initialLoading = loading && data === null;
+  const activeFilters = activeFilterCount(filters);
 
   return (
     <main className="shoppingShell">
@@ -353,19 +363,19 @@ export default function Home() {
           <p className="eyebrow">CENA × HISTORIE × MATERIÁL</p>
           <h1>Najdi kus, který se fakt vyplatí.</h1>
           <p>
-            Volný text je rychlý, ale produkční filtry níže mají vždy přednost. Díky tomu přesně víš,
-            co engine hledá a proč konkrétní produkt doporučuje.
+            Začni jedním klikem přes rychlé filtry. Volný text nech na značku nebo detail typu „bez velkého loga“.
+            Přesné filtry mají vždy přednost, takže přesně víš, co engine hledá.
           </p>
         </div>
 
         <form className="searchBox" onSubmit={submit}>
-          <label htmlFor="shopping-query">Co dnes hledáš?</label>
+          <label htmlFor="shopping-query">Značka nebo speciální požadavek</label>
           <div className="searchRow">
             <input
               id="shopping-query"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Např. Nike bílé tenisky nebo kvalitní mikina bez polyesteru"
+              placeholder="Např. Nike, Levi's, bez velkého loga…"
               autoComplete="off"
             />
             <button type="submit" disabled={loading}>
@@ -373,89 +383,98 @@ export default function Home() {
             </button>
           </div>
 
-          <div className="filterGrid" aria-label="Přesné filtry">
-            <label>
-              <span>Kategorie</span>
-              <select
-                value={filters.category}
-                onChange={(event) => setFilters((current) => ({ ...current, category: event.target.value }))}
-              >
-                {CATEGORY_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select>
-            </label>
-            <label>
-              <span>Barva</span>
-              <select
-                value={filters.color}
-                onChange={(event) => setFilters((current) => ({ ...current, color: event.target.value }))}
-              >
-                {COLOR_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select>
-            </label>
-            <label>
-              <span>Velikost</span>
-              <input
-                value={filters.size}
-                onChange={(event) => setFilters((current) => ({ ...current, size: event.target.value }))}
-                placeholder="L / 43,5 / W32/L32"
-                autoComplete="off"
-              />
-            </label>
-            <label>
-              <span>Max. cena</span>
-              <div className="priceInput">
+          <QuickFilters filters={filters} loading={loading} onChange={applyQuickFilters} />
+
+          <details className="advancedFilters">
+            <summary>
+              <span>Další přesné filtry</span>
+              <em>{activeFilters > 0 ? `${activeFilters} aktivní` : "volitelné"}</em>
+            </summary>
+
+            <div className="filterGrid" aria-label="Přesné filtry">
+              <label>
+                <span>Kategorie</span>
+                <select
+                  value={filters.category}
+                  onChange={(event) => setFilters((current) => ({ ...current, category: event.target.value }))}
+                >
+                  {CATEGORY_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+              <label>
+                <span>Barva</span>
+                <select
+                  value={filters.color}
+                  onChange={(event) => setFilters((current) => ({ ...current, color: event.target.value }))}
+                >
+                  {COLOR_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+              <label>
+                <span>Velikost</span>
                 <input
-                  inputMode="numeric"
-                  value={filters.maxPrice}
+                  value={filters.size}
+                  onChange={(event) => setFilters((current) => ({ ...current, size: event.target.value }))}
+                  placeholder="L / 43,5 / W32/L32"
+                  autoComplete="off"
+                />
+              </label>
+              <label>
+                <span>Max. cena</span>
+                <div className="priceInput">
+                  <input
+                    inputMode="numeric"
+                    value={filters.maxPrice}
+                    onChange={(event) => setFilters((current) => ({
+                      ...current,
+                      maxPrice: event.target.value.replace(/[^0-9]/g, "").slice(0, 7),
+                    }))}
+                    placeholder="2000"
+                  />
+                  <em>Kč</em>
+                </div>
+              </label>
+              <label>
+                <span>Materiál</span>
+                <select
+                  value={filters.material}
+                  onChange={(event) => setFilters((current) => ({ ...current, material: event.target.value }))}
+                >
+                  {MATERIAL_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+              <label>
+                <span>Řazení</span>
+                <select
+                  value={filters.sort}
                   onChange={(event) => setFilters((current) => ({
                     ...current,
-                    maxPrice: event.target.value.replace(/[^0-9]/g, "").slice(0, 7),
+                    sort: event.target.value as Filters["sort"],
                   }))}
-                  placeholder="2000"
-                />
-                <em>Kč</em>
-              </div>
-            </label>
-            <label>
-              <span>Materiál</span>
-              <select
-                value={filters.material}
-                onChange={(event) => setFilters((current) => ({ ...current, material: event.target.value }))}
-              >
-                {MATERIAL_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select>
-            </label>
-            <label>
-              <span>Řazení</span>
-              <select
-                value={filters.sort}
-                onChange={(event) => setFilters((current) => ({
-                  ...current,
-                  sort: event.target.value as Filters["sort"],
-                }))}
-              >
-                <option value="recommended">Doporučené</option>
-                <option value="deal">Nejlepší deal</option>
-                <option value="price">Nejlevnější</option>
-                <option value="history">Nejblíž našemu minimu</option>
-              </select>
-            </label>
-          </div>
+                >
+                  <option value="recommended">Doporučené</option>
+                  <option value="deal">Nejlepší deal</option>
+                  <option value="price">Nejlevnější</option>
+                  <option value="history">Nejblíž našemu minimu</option>
+                </select>
+              </label>
+            </div>
 
-          <div className="searchTools">
-            <label className="qualityToggle">
-              <input
-                type="checkbox"
-                checked={filters.quality}
-                onChange={(event) => setFilters((current) => ({ ...current, quality: event.target.checked }))}
-              />
-              <span>Upřednostnit kvalitu materiálu</span>
-            </label>
-            <button className="resetButton" type="button" onClick={reset}>Vyčistit hledání</button>
-          </div>
+            <div className="searchTools">
+              <label className="qualityToggle">
+                <input
+                  type="checkbox"
+                  checked={filters.quality}
+                  onChange={(event) => setFilters((current) => ({ ...current, quality: event.target.checked }))}
+                />
+                <span>Upřednostnit kvalitu materiálu</span>
+              </label>
+              <button className="resetButton" type="button" onClick={reset}>Vyčistit celé hledání</button>
+            </div>
+          </details>
 
           <div className="examples">
-            <span>Rychlé příklady:</span>
+            <span>Nebo zkus celou větu:</span>
             {EXAMPLES.map((example) => (
               <button key={example} type="button" onClick={() => useExample(example)}>
                 {example}

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./production.css";
+import "./quick-filters.css";
 
 export const metadata: Metadata = {
   title: "Price Intelligence — nejlepší fashion dealy",
