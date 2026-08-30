@@ -243,7 +243,7 @@ async function fetchBatch(intent: SearchIntent, spec: LiveBatchSpec) {
       "Accept-Language": "cs-CZ,cs;q=0.9,en;q=0.6",
     },
     next: { revalidate: 300 },
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(8_000),
   });
 
   if (!response.ok) {
