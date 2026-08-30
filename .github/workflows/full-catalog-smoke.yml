@@ -6,9 +6,9 @@ on:
 
 jobs:
   aboutyou-1k:
-    if: github.head_ref == 'feat/full-catalog-production'
+    if: github.head_ref == 'feat/catalog-partitions-price-refresh'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     permissions:
       contents: read
     env:
@@ -40,6 +40,8 @@ jobs:
           }
           NODE
       - run: npx playwright install --with-deps chromium
+      - name: Probe ABOUT YOU product stream structure
+        run: npm run probe:aboutyou-stream
       - name: Collect at least 1,000 public products
         run: |
           set -o pipefail
