@@ -9,16 +9,27 @@ export type CatalogCoverageAssessment = {
   reason: string;
 };
 
-export function parseReportedCatalogCount(text: string) {
-  const candidates = text
-    .replace(/\u00a0/g, " ")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => /^\d{1,3}(?:[ .]\d{3})+$/.test(line) || /^\d{4,6}$/.test(line))
-    .map((line) => Number(line.replace(/[ .]/g, "")))
-    .filter((value) => Number.isFinite(value) && value >= 100 && value <= 500_000);
+function normalizeCandidate(value: string) {
+  const parsed = Number(value.replace(/[ .\u00a0]/g, ""));
+  return Number.isFinite(parsed) && parsed >= 100 && parsed <= 500_000 ? parsed : null;
+}
 
-  return candidates.length > 0 ? Math.max(...candidates) : null;
+export function parseReportedCatalogCount(text: string) {
+  const normalized = text.replace(/\u00a0/g, " ");
+  const candidates = new Set<number>();
+
+  for (const line of normalized.split(/\r?\n/).map((value) => value.trim())) {
+    if (!/^\d{1,3}(?:[ .]\d{3})+$/.test(line) && !/^\d{4,6}$/.test(line)) continue;
+    const value = normalizeCandidate(line);
+    if (value !== null) candidates.add(value);
+  }
+
+  for (const match of normalized.matchAll(/(?:^|\D)(\d{1,3}(?:[ .]\d{3})+)(?=\D|$)/g)) {
+    const value = normalizeCandidate(match[1]);
+    if (value !== null) candidates.add(value);
+  }
+
+  return candidates.size > 0 ? Math.max(...candidates) : null;
 }
 
 export function coverageRatio(observedProducts: number, reportedProducts: number | null) {
