@@ -101,7 +101,6 @@ function removeBrandTokens(tokens: string[], alias: string) {
     return [...tokens.slice(0, index), ...tokens.slice(index + aliasTokens.length)];
   }
 
-  // Handles compact aliases such as newbalance.
   const compactAlias = compactMarketText(alias);
   return tokens.filter((token) => compactMarketText(token) !== compactAlias);
 }
@@ -128,12 +127,9 @@ export function parseMarketSearchIntent(raw: string): MarketSearchIntent {
   let terms = removeBrandTokens(tokenized(normalized), brandMatch.alias);
   let size: string | null = null;
 
-  // A standalone footwear size is safe to consume only after a known brand was resolved.
   const sizeIndex = terms.findIndex((term, index) => {
     if (!isShoeSize(term)) return false;
     if (index > 0 && terms[index - 1] === "velikost") return true;
-    // Numeric model names such as New Balance 530 must stay model terms unless there is
-    // already at least one other model token before the number.
     const modelishBefore = terms.slice(0, index).filter((candidate) => !NOISE_TERMS.has(candidate));
     return modelishBefore.length >= 1;
   });
@@ -171,9 +167,27 @@ export function marketUrlMatchesIntent(url: string, intent: MarketSearchIntent) 
     && compactUrl.includes(compactMarketText(intent.model));
 }
 
-export function marketTitleMatchesIntent(title: string, intent: MarketSearchIntent) {
+export function marketProductMatchesIntent(
+  title: string,
+  structuredBrand: string | null,
+  intent: MarketSearchIntent,
+) {
   if (!intent.exactProduct || !intent.brand || !intent.model) return false;
+
   const compactTitle = compactMarketText(title);
-  return compactTitle.includes(compactMarketText(intent.brand))
-    && compactTitle.includes(compactMarketText(intent.model));
+  const expectedModel = compactMarketText(intent.model);
+  if (!compactTitle.includes(expectedModel)) return false;
+
+  const expectedBrand = compactMarketText(intent.brand);
+  if (compactTitle.includes(expectedBrand)) return true;
+
+  const actualBrand = compactMarketText(structuredBrand ?? "");
+  return Boolean(
+    actualBrand
+    && (actualBrand.includes(expectedBrand) || expectedBrand.includes(actualBrand)),
+  );
+}
+
+export function marketTitleMatchesIntent(title: string, intent: MarketSearchIntent) {
+  return marketProductMatchesIntent(title, null, intent);
 }
