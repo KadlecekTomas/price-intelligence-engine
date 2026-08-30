@@ -1,0 +1,25 @@
+name: Full Catalog Smoke
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  aboutyou-1k:
+    if: github.head_ref == 'feat/full-catalog-production'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+      - name: Collect at least 1,000 public products
+        run: |
+          set -o pipefail
+          npm run sync:aboutyou -- --dry-run --target=1000 --max-steps=120 --delay=350 | tee /tmp/full-sync.log
+          grep -Eq 'Produkty: (1[ .]?000|[1-9][0-9 .]{3,})' /tmp/full-sync.log
