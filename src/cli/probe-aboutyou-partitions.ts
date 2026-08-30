@@ -39,6 +39,9 @@ async function main() {
   if (brandLeaves.length > 0) {
     throw new Error(`Partition plan still contains ${brandLeaves.length} non-exhaustive visible-brand leaves`);
   }
+  if (unknownLeaves.length > 0) {
+    throw new Error(`Partition plan still has ${unknownLeaves.length} leaves without a trustworthy reported total`);
+  }
 }
 
 main().catch((error) => {
