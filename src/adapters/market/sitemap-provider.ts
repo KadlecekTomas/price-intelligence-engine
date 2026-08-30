@@ -30,6 +30,12 @@ type SitemapProviderConfig = {
   maxPdpCandidates?: number;
 };
 
+type OfferCheck = {
+  offer: MarketOffer | null;
+  reachedProductPage: boolean;
+  blocked: boolean;
+};
+
 const globalCache = globalThis as typeof globalThis & {
   __marketSitemapCache?: Map<string, SitemapCacheEntry>;
 };
@@ -102,22 +108,38 @@ async function fetchOffer(
   config: SitemapProviderConfig,
   url: string,
   intent: MarketSearchIntent,
-): Promise<MarketOffer | null> {
+): Promise<OfferCheck> {
   const response = await fetch(url, {
     headers: HEADERS,
     next: { revalidate: 180 },
     signal: AbortSignal.timeout(8_000),
   });
-  if (!response.ok) return null;
+
+  if (!response.ok) {
+    return {
+      offer: null,
+      reachedProductPage: false,
+      blocked: [400, 401, 403, 429].includes(response.status),
+    };
+  }
 
   const html = await response.text();
-  if (html.length < 5_000) return null;
+  if (html.length < 5_000) {
+    return { offer: null, reachedProductPage: true, blocked: false };
+  }
+
   const product = parseMarketProductPage(html);
-  if (!product || product.availability === "out_of_stock") return null;
-  if (!marketProductMatchesIntent(product.title, product.brand, intent)) return null;
+  if (!product || product.availability === "out_of_stock") {
+    return { offer: null, reachedProductPage: true, blocked: false };
+  }
+  if (!marketProductMatchesIntent(product.title, product.brand, intent)) {
+    return { offer: null, reachedProductPage: true, blocked: false };
+  }
 
   const sizeStatus = requestedSizeStatus(product.sizes, intent.size);
-  if (sizeStatus === "unavailable") return null;
+  if (sizeStatus === "unavailable") {
+    return { offer: null, reachedProductPage: true, blocked: false };
+  }
 
   const normalizedBrand = normalizeMarketText(product.brand ?? "");
   const expectedBrand = normalizeMarketText(intent.brand ?? "");
@@ -131,26 +153,30 @@ async function fetchOffer(
     + (product.gtin ? 3 : 0);
 
   return {
-    id: `${config.id}:${product.sku ?? url}`,
-    shopId: config.id,
-    shopName: config.name,
-    url,
-    title: product.title,
-    brand: product.brand,
-    model: intent.model,
-    sku: product.sku,
-    gtin: product.gtin,
-    color: product.color,
-    priceCzk: product.priceCzk,
-    shippingCzk: null,
-    totalPriceCzk: product.priceCzk,
-    currency: "CZK",
-    availability: product.availability,
-    sizes: product.sizes,
-    requestedSizeStatus: sizeStatus,
-    matchScore: Math.min(100, matchScore),
-    source: "sitemap-pdp",
-    checkedAt: new Date().toISOString(),
+    reachedProductPage: true,
+    blocked: false,
+    offer: {
+      id: `${config.id}:${product.sku ?? url}`,
+      shopId: config.id,
+      shopName: config.name,
+      url,
+      title: product.title,
+      brand: product.brand,
+      model: intent.model,
+      sku: product.sku,
+      gtin: product.gtin,
+      color: product.color,
+      priceCzk: product.priceCzk,
+      shippingCzk: null,
+      totalPriceCzk: product.priceCzk,
+      currency: "CZK",
+      availability: product.availability,
+      sizes: product.sizes,
+      requestedSizeStatus: sizeStatus,
+      matchScore: Math.min(100, matchScore),
+      source: "sitemap-pdp",
+      checkedAt: new Date().toISOString(),
+    },
   };
 }
 
@@ -159,35 +185,66 @@ export function createSitemapMarketProvider(config: SitemapProviderConfig): Mark
     id: config.id,
     name: config.name,
     async search(intent) {
-      if (!intent.exactProduct) return { offers: [], catalogCount: 0, candidateCount: 0, warning: null };
+      if (!intent.exactProduct) {
+        return {
+          offers: [],
+          catalogCount: 0,
+          matchedCount: 0,
+          checkedCount: 0,
+          verification: "catalog-only" as const,
+          warning: null,
+        };
+      }
 
       const urls = await fetchSitemapUrls(config);
-      const candidates = findSitemapCandidateUrls(
-        urls,
-        intent,
-        config.maxPdpCandidates ?? 12,
-      );
+      const allMatches = urls.filter((url) => marketUrlMatchesIntent(url, intent));
+      const candidates = allMatches.slice(0, Math.max(1, Math.min(config.maxPdpCandidates ?? 12, 48)));
       if (candidates.length === 0) {
-        return { offers: [], catalogCount: urls.length, candidateCount: 0, warning: null };
+        return {
+          offers: [],
+          catalogCount: urls.length,
+          matchedCount: 0,
+          checkedCount: 0,
+          verification: "catalog-only" as const,
+          warning: null,
+        };
       }
 
       const settled = await Promise.allSettled(
         candidates.map((url) => fetchOffer(config, url, intent)),
       );
-      const offers = settled
-        .filter((result): result is PromiseFulfilledResult<MarketOffer | null> => result.status === "fulfilled")
-        .map((result) => result.value)
+      const checks = settled
+        .filter((result): result is PromiseFulfilledResult<OfferCheck> => result.status === "fulfilled")
+        .map((result) => result.value);
+      const offers = checks
+        .map((check) => check.offer)
         .filter((offer): offer is MarketOffer => offer !== null)
         .sort((a, b) => a.totalPriceCzk - b.totalPriceCzk || b.matchScore - a.matchScore);
 
-      const failures = settled.filter((result) => result.status === "rejected").length;
+      const requestFailures = settled.filter((result) => result.status === "rejected").length;
+      const blockedCount = checks.filter((check) => check.blocked).length;
+      const reachedCount = checks.filter((check) => check.reachedProductPage).length;
+      const verification = blockedCount > 0 && reachedCount === 0
+        ? "blocked" as const
+        : reachedCount > 0
+          ? "live" as const
+          : "catalog-only" as const;
+
+      const warning = verification === "blocked"
+        ? `${config.name}: aktivní katalog a ${allMatches.length} odpovídajících URL jsme našli, ale obchod odmítl serverové ověření produktových detailů. Cenu proto netvrdíme.`
+        : requestFailures > 0
+          ? `${requestFailures} produktových detailů z ${config.name} se nepodařilo ověřit.`
+          : allMatches.length > candidates.length
+            ? `${config.name}: našli jsme ${allMatches.length} odpovídajících URL, ale v tomto requestu jsme ověřili jen ${candidates.length}.`
+            : null;
+
       return {
         offers,
         catalogCount: urls.length,
-        candidateCount: candidates.length,
-        warning: failures > 0
-          ? `${failures} produktových detailů z ${config.name} se nepodařilo ověřit.`
-          : null,
+        matchedCount: allMatches.length,
+        checkedCount: reachedCount,
+        verification,
+        warning,
       };
     },
   };
