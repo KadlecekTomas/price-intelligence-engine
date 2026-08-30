@@ -1,7 +1,7 @@
 import { parseMarketProductPage } from "@/domain/market-product-page";
 import type { MarketOffer } from "@/domain/market-offer";
 import {
-  marketTitleMatchesIntent,
+  marketProductMatchesIntent,
   marketUrlMatchesIntent,
   normalizeMarketText,
   type MarketSearchIntent,
@@ -59,7 +59,7 @@ export function findSitemapCandidateUrls(
   if (!intent.exactProduct) return [];
   return urls
     .filter((url) => marketUrlMatchesIntent(url, intent))
-    .slice(0, Math.max(1, Math.min(limit, 24)));
+    .slice(0, Math.max(1, Math.min(limit, 48)));
 }
 
 function normalizeSize(value: string) {
@@ -114,7 +114,7 @@ async function fetchOffer(
   if (html.length < 5_000) return null;
   const product = parseMarketProductPage(html);
   if (!product || product.availability === "out_of_stock") return null;
-  if (!marketTitleMatchesIntent(product.title, intent)) return null;
+  if (!marketProductMatchesIntent(product.title, product.brand, intent)) return null;
 
   const sizeStatus = requestedSizeStatus(product.sizes, intent.size);
   if (sizeStatus === "unavailable") return null;
@@ -159,19 +159,16 @@ export function createSitemapMarketProvider(config: SitemapProviderConfig): Mark
     id: config.id,
     name: config.name,
     async search(intent) {
-      if (!intent.exactProduct) {
-        return { offers: [], catalogCount: 0, candidateCount: 0, warning: null };
-      }
+      if (!intent.exactProduct) return { offers: [], catalogCount: 0, candidateCount: 0, warning: null };
 
       const urls = await fetchSitemapUrls(config);
-      const catalogCount = urls.length;
       const candidates = findSitemapCandidateUrls(
         urls,
         intent,
         config.maxPdpCandidates ?? 12,
       );
       if (candidates.length === 0) {
-        return { offers: [], catalogCount, candidateCount: 0, warning: null };
+        return { offers: [], catalogCount: urls.length, candidateCount: 0, warning: null };
       }
 
       const settled = await Promise.allSettled(
@@ -186,7 +183,7 @@ export function createSitemapMarketProvider(config: SitemapProviderConfig): Mark
       const failures = settled.filter((result) => result.status === "rejected").length;
       return {
         offers,
-        catalogCount,
+        catalogCount: urls.length,
         candidateCount: candidates.length,
         warning: failures > 0
           ? `${failures} produktových detailů z ${config.name} se nepodařilo ověřit.`
