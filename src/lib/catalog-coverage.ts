@@ -14,22 +14,43 @@ function normalizeCandidate(value: string) {
   return Number.isFinite(parsed) && parsed >= 100 && parsed <= 500_000 ? parsed : null;
 }
 
-export function parseReportedCatalogCount(text: string) {
-  const normalized = text.replace(/\u00a0/g, " ");
-  const candidates = new Set<number>();
+function catalogCountToken() {
+  return String.raw`(\d{1,3}(?:[ .]\d{3})+|\d{4,6})`;
+}
 
-  for (const line of normalized.split(/\r?\n/).map((value) => value.trim())) {
+export function parseReportedCatalogCount(text: string) {
+  const normalized = text
+    .replace(/\u00a0/g, " ")
+    .replace(/[\t\r]+/g, " ")
+    .replace(/ {2,}/g, " ");
+  const token = catalogCountToken();
+
+  // ABOUT YOU renders the authoritative category total directly between the
+  // category heading and the filter/sort controls. Prefer that semantic context
+  // over arbitrary large numbers embedded elsewhere in the page (campaign IDs,
+  // timers, tracking payloads, etc.).
+  const contextualPatterns = [
+    new RegExp(`(?:Móda pro muže|Oblečení pro muže|Boty pro muže|Doplňky pro muže|Sportovní móda[^\\n]{0,80}pro muže)[\\s\\n]*${token}[\\s\\n]*(?:Zobrazit|Třídění|Cena)`, "i"),
+    new RegExp(`(?:Produkty|Výsledky|Položky)\\s*:?\\s*${token}`, "i"),
+  ];
+
+  for (const pattern of contextualPatterns) {
+    const match = normalized.match(pattern);
+    const value = normalizeCandidate(match?.[1] ?? "");
+    if (value !== null) return value;
+  }
+
+  // Fallback only when there is exactly one plausible standalone total. Never
+  // take Math.max(): that previously turned unrelated six-digit page values into
+  // a fake catalog size (e.g. 493 493 instead of ~112k products).
+  const standalone = new Set<number>();
+  for (const line of normalized.split(/\n/).map((value) => value.trim())) {
     if (!/^\d{1,3}(?:[ .]\d{3})+$/.test(line) && !/^\d{4,6}$/.test(line)) continue;
     const value = normalizeCandidate(line);
-    if (value !== null) candidates.add(value);
+    if (value !== null) standalone.add(value);
   }
 
-  for (const match of normalized.matchAll(/(?:^|\D)(\d{1,3}(?:[ .]\d{3})+)(?=\D|$)/g)) {
-    const value = normalizeCandidate(match[1]);
-    if (value !== null) candidates.add(value);
-  }
-
-  return candidates.size > 0 ? Math.max(...candidates) : null;
+  return standalone.size === 1 ? [...standalone][0] : null;
 }
 
 export function coverageRatio(observedProducts: number, reportedProducts: number | null) {
