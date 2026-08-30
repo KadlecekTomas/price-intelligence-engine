@@ -17,6 +17,11 @@ test("parseReportedCatalogCount reads deep leaf total without gender in heading"
   assert.equal(parseReportedCatalogCount(text), 16_432);
 });
 
+test("parseReportedCatalogCount reads small leaf totals below one thousand", () => {
+  assert.equal(parseReportedCatalogCount("Plavky 742 Zobrazit Cena Barva"), 742);
+  assert.equal(parseReportedCatalogCount("Sportovní doplňky\n97\nZobrazit"), 97);
+});
+
 test("parseReportedCatalogCount also handles flattened HTML text around filter control", () => {
   const text = "Trička s krátkým rukávem 16 432 Zobrazit Cena Barva tracking 493 493";
   assert.equal(parseReportedCatalogCount(text), 16_432);
