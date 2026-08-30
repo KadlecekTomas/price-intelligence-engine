@@ -20,7 +20,7 @@ export type MarketOffer = {
   sizes: string[];
   requestedSizeStatus: "available" | "unavailable" | "unknown";
   matchScore: number;
-  source: "sitemap-pdp" | "catalog-index";
+  source: "sitemap-pdp" | "catalog-index" | "public-search-pdp";
   checkedAt: string;
 };
 
