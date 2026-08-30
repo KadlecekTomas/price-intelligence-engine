@@ -1,0 +1,38 @@
+name: Market Provider Smoke
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: market-provider-smoke-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sizeer-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Verify Sizeer CZ public collection and PDP pricing
+        run: npm run probe:sizeer-market
+
+  buzz-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Verify Buzz Sneakers CZ public collection and PDP pricing
+        run: npm run probe:buzz-market
