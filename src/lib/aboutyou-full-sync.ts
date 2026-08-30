@@ -1,4 +1,4 @@
-import { chromium, type Page } from "playwright";
+import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { parseAboutYouCard } from "@/domain/aboutyou-card";
 import { coverageRatio, parseReportedCatalogCount, type CatalogStopReason } from "@/lib/catalog-coverage";
 import type { ScannedProduct } from "@/lib/discovery-state";
@@ -26,6 +26,7 @@ export type AboutYouFullSyncOptions = {
   checkpointEvery?: number;
   minimumCoverage?: number;
   headless?: boolean;
+  browser?: Browser;
   onCheckpoint?: (products: ScannedProduct[], progress: AboutYouFullSyncProgress) => Promise<void> | void;
   onProgress?: (progress: AboutYouFullSyncProgress) => Promise<void> | void;
 };
@@ -144,9 +145,12 @@ export async function collectAboutYouFullCatalog(options: AboutYouFullSyncOption
   let reportedProducts: number | null = null;
   let stoppedBecause: CatalogStopReason = "max-steps";
 
-  const browser = await chromium.launch({ headless: options.headless ?? true });
+  const ownsBrowser = !options.browser;
+  const browser = options.browser ?? await chromium.launch({ headless: options.headless ?? true });
+  let context: BrowserContext | null = null;
+
   try {
-    const context = await browser.newContext({
+    context = await browser.newContext({
       locale: "cs-CZ",
       timezoneId: "Europe/Prague",
       viewport: { width: 1440, height: 1000 },
@@ -232,7 +236,8 @@ export async function collectAboutYouFullCatalog(options: AboutYouFullSyncOption
     await flushCheckpoint(completedSteps, true);
     await options.onProgress?.(progress(completedSteps));
   } finally {
-    await browser.close();
+    await context?.close().catch(() => undefined);
+    if (ownsBrowser) await browser.close();
   }
 
   return {
