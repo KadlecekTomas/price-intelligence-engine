@@ -123,7 +123,7 @@ async function persistChunk(run: FullSyncRun, products: ScannedProduct[]) {
       updated_at: new Date(),
     }));
 
-    const persisted = await tx<{ id: string; external_key: string }[]>`
+    const persistedRows = await tx`
       INSERT INTO products ${tx(
         productRows,
         "shop_id",
@@ -152,12 +152,25 @@ async function persistChunk(run: FullSyncRun, products: ScannedProduct[]) {
         updated_at = NOW()
       RETURNING id::text, external_key
     `;
+    const persisted = persistedRows as unknown as Array<{ id: string; external_key: string }>;
+    const ids = new Map<string, string>(persisted.map((row) => [row.external_key, row.id]));
 
-    const ids = new Map(persisted.map((row) => [row.external_key, row.id]));
-    const snapshotRows = products.flatMap((product) => {
+    const snapshotRows: Array<{
+      product_id: string;
+      scan_run_id: string;
+      current_price_czk: number;
+      original_price_czk: number | null;
+      lowest_30d_czk: number | null;
+      deal_score: number | null;
+      material_score: number | null;
+      buy_score: number | null;
+      verdict: ScannedProduct["verdict"];
+    }> = [];
+
+    for (const product of products) {
       const productId = ids.get(product.id);
-      if (!productId) return [];
-      return [{
+      if (!productId) continue;
+      snapshotRows.push({
         product_id: productId,
         scan_run_id: run.runId,
         current_price_czk: product.currentPriceCzk,
@@ -167,8 +180,8 @@ async function persistChunk(run: FullSyncRun, products: ScannedProduct[]) {
         material_score: product.materialScore,
         buy_score: product.buyScore,
         verdict: product.verdict,
-      }];
-    });
+      });
+    }
 
     if (snapshotRows.length > 0) {
       await tx`
