@@ -33,6 +33,7 @@ jobs:
           npm run sync:aboutyou:partitioned --
           --url="https://www.aboutyou.cz/c/muzi-20202"
           --split-above="850"
+          --max-partitions="2000"
           --max-steps="350"
           --delay="450"
           --min-coverage="0.995"
