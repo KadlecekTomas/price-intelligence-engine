@@ -1,5 +1,6 @@
-import { chromium, type Page } from "playwright";
+import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { parseAboutYouCard } from "@/domain/aboutyou-card";
+import { coverageRatio, parseReportedCatalogCount, type CatalogStopReason } from "@/lib/catalog-coverage";
 import type { ScannedProduct } from "@/lib/discovery-state";
 
 const DEFAULT_START_URL = "https://www.aboutyou.cz/c/muzi-20202";
@@ -9,6 +10,8 @@ export type AboutYouFullSyncProgress = {
   step: number;
   uniqueProducts: number;
   parsedProducts: number;
+  reportedProducts: number | null;
+  coverage: number | null;
   stagnantSteps: number;
   pageRequestsObserved: number;
   elapsedMs: number;
@@ -21,7 +24,9 @@ export type AboutYouFullSyncOptions = {
   scrollDelayMs?: number;
   stagnantStepLimit?: number;
   checkpointEvery?: number;
+  minimumCoverage?: number;
   headless?: boolean;
+  browser?: Browser;
   onCheckpoint?: (products: ScannedProduct[], progress: AboutYouFullSyncProgress) => Promise<void> | void;
   onProgress?: (progress: AboutYouFullSyncProgress) => Promise<void> | void;
 };
@@ -29,15 +34,22 @@ export type AboutYouFullSyncOptions = {
 export type AboutYouFullSyncResult = {
   startUrl: string;
   products: ScannedProduct[];
+  reportedProducts: number | null;
+  coverage: number | null;
   steps: number;
   pageRequestsObserved: number;
   elapsedMs: number;
-  stoppedBecause: "target" | "stagnant" | "max-steps";
+  stoppedBecause: CatalogStopReason;
 };
 
 function clampInt(value: number | undefined, fallback: number, min: number, max: number) {
   if (!Number.isFinite(value)) return fallback;
   return Math.max(min, Math.min(Math.round(value!), max));
+}
+
+function clampCoverage(value: number | undefined) {
+  if (!Number.isFinite(value)) return 0.995;
+  return Math.max(0.9, Math.min(value!, 1));
 }
 
 function safeStartUrl(value: string | undefined) {
@@ -92,12 +104,7 @@ async function readVisibleProductCards(page: Page) {
           .replace(/\s+/g, " ")
           .trim();
         const productLinkCount = current.querySelectorAll('a[href*="/p/"]').length;
-        if (
-          candidate.length > 0 &&
-          candidate.length <= 3_500 &&
-          productLinkCount <= 4 &&
-          /Kč/.test(candidate)
-        ) {
+        if (candidate.length > 0 && candidate.length <= 3_500 && productLinkCount <= 4 && /Kč/.test(candidate)) {
           firstPriceText ??= candidate;
           if (/Poslední nejnižší cena|Původně:/i.test(candidate)) {
             preferredText = candidate;
@@ -107,10 +114,7 @@ async function readVisibleProductCards(page: Page) {
         current = current.parentElement;
       }
 
-      return {
-        url: anchor.href,
-        text: preferredText ?? firstPriceText ?? anchorText,
-      };
+      return { url: anchor.href, text: preferredText ?? firstPriceText ?? anchorText };
     }),
   );
 }
@@ -123,15 +127,14 @@ function richerProduct(existing: ScannedProduct | undefined, candidate: ScannedP
   return candidate.text.length > existing.text.length ? candidate : existing;
 }
 
-export async function collectAboutYouFullCatalog(
-  options: AboutYouFullSyncOptions = {},
-): Promise<AboutYouFullSyncResult> {
+export async function collectAboutYouFullCatalog(options: AboutYouFullSyncOptions = {}): Promise<AboutYouFullSyncResult> {
   const startUrl = safeStartUrl(options.startUrl);
   const targetProducts = clampInt(options.targetProducts, 120_000, 100, 200_000);
   const maxSteps = clampInt(options.maxSteps, 5_000, 10, 10_000);
   const scrollDelayMs = clampInt(options.scrollDelayMs, 650, 250, 5_000);
   const stagnantStepLimit = clampInt(options.stagnantStepLimit, 24, 5, 100);
   const checkpointEvery = clampInt(options.checkpointEvery, 750, 100, 5_000);
+  const minimumCoverage = clampCoverage(options.minimumCoverage);
   const started = Date.now();
   const products = new Map<string, ScannedProduct>();
   const dirty = new Map<string, ScannedProduct>();
@@ -139,11 +142,15 @@ export async function collectAboutYouFullCatalog(
   let stagnantSteps = 0;
   let previousCount = 0;
   let completedSteps = 0;
-  let stoppedBecause: AboutYouFullSyncResult["stoppedBecause"] = "max-steps";
+  let reportedProducts: number | null = null;
+  let stoppedBecause: CatalogStopReason = "max-steps";
 
-  const browser = await chromium.launch({ headless: options.headless ?? true });
+  const ownsBrowser = !options.browser;
+  const browser = options.browser ?? await chromium.launch({ headless: options.headless ?? true });
+  let context: BrowserContext | null = null;
+
   try {
-    const context = await browser.newContext({
+    context = await browser.newContext({
       locale: "cs-CZ",
       timezoneId: "Europe/Prague",
       viewport: { width: 1440, height: 1000 },
@@ -157,11 +164,14 @@ export async function collectAboutYouFullCatalog(
     await page.goto(startUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
     await acceptConsent(page);
     await page.waitForTimeout(900);
+    reportedProducts = parseReportedCatalogCount(await page.locator("body").innerText().catch(() => ""));
 
     const progress = (step: number): AboutYouFullSyncProgress => ({
       step,
       uniqueProducts: products.size,
       parsedProducts: products.size,
+      reportedProducts,
+      coverage: coverageRatio(products.size, reportedProducts),
       stagnantSteps,
       pageRequestsObserved,
       elapsedMs: Date.now() - started,
@@ -199,6 +209,11 @@ export async function collectAboutYouFullCatalog(
       await flushCheckpoint(step);
       if (step === 1 || step % 10 === 0) await options.onProgress?.(progress(step));
 
+      const coverage = coverageRatio(products.size, reportedProducts);
+      if (coverage !== null && coverage >= minimumCoverage) {
+        stoppedBecause = "reported-total";
+        break;
+      }
       if (products.size >= targetProducts) {
         stoppedBecause = "target";
         break;
@@ -212,26 +227,24 @@ export async function collectAboutYouFullCatalog(
         .waitForResponse((response) => PAGE_REQUEST.test(response.url()), { timeout: Math.max(2_500, scrollDelayMs * 6) })
         .catch(() => null);
       const lastProduct = page.locator('a[href*="/p/"]').last();
-      if (await lastProduct.count()) {
-        await lastProduct.scrollIntoViewIfNeeded().catch(() => undefined);
-      }
+      if (await lastProduct.count()) await lastProduct.scrollIntoViewIfNeeded().catch(() => undefined);
       await page.keyboard.press("End").catch(() => undefined);
-      await Promise.race([
-        nextPageSignal,
-        page.waitForTimeout(Math.max(1_200, scrollDelayMs * 3)),
-      ]);
+      await Promise.race([nextPageSignal, page.waitForTimeout(Math.max(1_200, scrollDelayMs * 3))]);
       await page.waitForTimeout(Math.max(650, scrollDelayMs));
     }
 
     await flushCheckpoint(completedSteps, true);
     await options.onProgress?.(progress(completedSteps));
   } finally {
-    await browser.close();
+    await context?.close().catch(() => undefined);
+    if (ownsBrowser) await browser.close();
   }
 
   return {
     startUrl,
     products: [...products.values()],
+    reportedProducts,
+    coverage: coverageRatio(products.size, reportedProducts),
     steps: completedSteps,
     pageRequestsObserved,
     elapsedMs: Date.now() - started,

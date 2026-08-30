@@ -6,9 +6,9 @@ on:
 
 jobs:
   aboutyou-1k:
-    if: github.head_ref == 'feat/full-catalog-production'
+    if: github.head_ref == 'feat/catalog-partitions-price-refresh'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     permissions:
       contents: read
     env:
@@ -39,7 +39,11 @@ jobs:
             await sql.end({ timeout: 2 });
           }
           NODE
+      - name: Verify public category partition discovery
+        run: npm run probe:aboutyou-partitions
       - run: npx playwright install --with-deps chromium
+      - name: Probe ABOUT YOU product stream transport
+        run: npm run probe:aboutyou-stream
       - name: Collect at least 1,000 public products
         run: |
           set -o pipefail

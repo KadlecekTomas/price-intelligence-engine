@@ -9,7 +9,11 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test src/**/*.test.ts",
     "scan": "tsx src/cli/scan.ts",
-    "sync:aboutyou": "tsx src/cli/sync-aboutyou.ts"
+    "sync:aboutyou": "tsx src/cli/sync-aboutyou.ts",
+    "sync:aboutyou:partitioned": "tsx src/cli/sync-aboutyou-partitioned.ts",
+    "refresh:aboutyou:prices": "tsx src/cli/refresh-aboutyou-prices.ts",
+    "probe:aboutyou-stream": "tsx src/cli/probe-aboutyou-stream.ts",
+    "probe:aboutyou-partitions": "tsx src/cli/probe-aboutyou-partitions.ts"
   },
   "dependencies": {
     "cheerio": "^1.1.2",
