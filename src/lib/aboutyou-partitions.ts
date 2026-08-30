@@ -5,6 +5,17 @@ const ABOUTYOU_HOST = "www.aboutyou.cz";
 const MEN_ROOT_PATH = "/c/muzi-20202";
 const MEN_CATEGORY_PREFIX = "/c/muzi/";
 const PRIMARY_ROOT_CATEGORY = /^\/c\/muzi\/(?:obleceni|boty|sport|doplnky)-\d+$/;
+const OVERLAPPING_CATEGORY_SLUGS = new Set([
+  "nove",
+  "oblibene",
+  "prilezitosti",
+  "exkluzivne",
+  "upcyklace",
+  "vyprodej",
+  "top-100",
+  "nadmerne-velikosti",
+  "druhy-sportu",
+]);
 
 const HEADERS = {
   Accept: "text/html,application/xhtml+xml",
@@ -34,6 +45,12 @@ function stripCategoryId(pathname: string) {
   return pathname.replace(/-\d+$/, "");
 }
 
+function lastCategorySlug(urlValue: string) {
+  const pathname = new URL(urlValue).pathname;
+  const segment = pathname.split("/").filter(Boolean).at(-1) ?? "";
+  return segment.replace(/-\d+$/, "");
+}
+
 function canonicalCategoryUrl(raw: string, baseUrl: string) {
   try {
     const url = new URL(raw, baseUrl);
@@ -59,9 +76,13 @@ export function categoryDepth(urlValue: string) {
 
 export function selectPartitionChildren(currentUrl: string, childCategories: string[]) {
   const current = new URL(currentUrl);
-  if (current.pathname !== MEN_ROOT_PATH) return childCategories;
-  const primary = childCategories.filter((value) => PRIMARY_ROOT_CATEGORY.test(new URL(value).pathname));
-  return primary.length >= 3 ? primary : childCategories;
+  if (current.pathname === MEN_ROOT_PATH) {
+    const primary = childCategories.filter((value) => PRIMARY_ROOT_CATEGORY.test(new URL(value).pathname));
+    return primary.length >= 3 ? primary : childCategories;
+  }
+
+  const taxonomyChildren = childCategories.filter((value) => !OVERLAPPING_CATEGORY_SLUGS.has(lastCategorySlug(value)));
+  return taxonomyChildren.length > 0 ? taxonomyChildren : childCategories;
 }
 
 export function extractAboutYouPartitionLinks(html: string, currentUrl: string) {
