@@ -9,13 +9,13 @@ export type CatalogCoverageAssessment = {
   reason: string;
 };
 
-function normalizeCandidate(value: string) {
+function normalizeCandidate(value: string, minimum = 1) {
   const parsed = Number(value.replace(/[ .\u00a0]/g, ""));
-  return Number.isFinite(parsed) && parsed >= 100 && parsed <= 500_000 ? parsed : null;
+  return Number.isFinite(parsed) && parsed >= minimum && parsed <= 500_000 ? parsed : null;
 }
 
 function catalogCountToken() {
-  return String.raw`(\d{1,3}(?:[ .]\d{3})+|\d{4,6})`;
+  return String.raw`(\d{1,3}(?:[ .]\d{3})+|\d{1,6})`;
 }
 
 export function parseReportedCatalogCount(text: string) {
@@ -27,7 +27,8 @@ export function parseReportedCatalogCount(text: string) {
 
   // The category count is rendered immediately before ABOUT YOU's filter control
   // ("Zobrazit") even for deep leaves whose heading no longer says "pro muže".
-  // This is much safer than selecting the largest six-digit number from the page.
+  // Context makes small counts (e.g. 742) safe to accept; they are common in
+  // terminal taxonomy categories and must not become "unknown" coverage.
   const contextualPatterns = [
     new RegExp(`${token}\\s*(?:Zobrazit|Třídění)`, "i"),
     new RegExp(`(?:Produkty|Výsledky|Položky)\\s*:?\\s*${token}`, "i"),
@@ -36,17 +37,16 @@ export function parseReportedCatalogCount(text: string) {
 
   for (const pattern of contextualPatterns) {
     const match = normalized.match(pattern);
-    const value = normalizeCandidate(match?.[1] ?? "");
+    const value = normalizeCandidate(match?.[1] ?? "", 1);
     if (value !== null) return value;
   }
 
-  // Fallback only when there is exactly one plausible standalone total. Never
-  // take Math.max(): that previously turned unrelated six-digit page values into
-  // a fake catalog size (e.g. 493 493 instead of ~112k products).
+  // Fallback only when there is exactly one plausible standalone total. Keep a
+  // higher minimum here because isolated small integers are common page noise.
   const standalone = new Set<number>();
   for (const line of normalized.split(/\n/).map((value) => value.trim())) {
     if (!/^\d{1,3}(?:[ .]\d{3})+$/.test(line) && !/^\d{4,6}$/.test(line)) continue;
-    const value = normalizeCandidate(line);
+    const value = normalizeCandidate(line, 100);
     if (value !== null) standalone.add(value);
   }
 
