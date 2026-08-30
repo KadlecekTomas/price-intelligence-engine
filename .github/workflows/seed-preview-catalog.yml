@@ -1,0 +1,57 @@
+name: Seed Preview Catalog
+
+on:
+  push:
+    branches: [feat/full-catalog-production]
+
+jobs:
+  seed:
+    if: contains(github.event.head_commit.message, '[seed-preview]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm run typecheck
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - name: Publish 1k ABOUT YOU preview catalog atomically
+        run: npm run sync:aboutyou -- --target=1000 --max-steps=120 --delay=350 --checkpoint=250
+      - name: Verify published catalog
+        run: |
+          node --input-type=module <<'NODE'
+          import postgres from "postgres";
+          const sql = postgres(process.env.DATABASE_URL, {
+            max: 1,
+            prepare: false,
+            connect_timeout: 10,
+            idle_timeout: 2,
+            ssl: "require",
+          });
+          try {
+            const rows = await sql`
+              select
+                publication.active_run_id,
+                run.product_count,
+                (select count(*)::int from catalog_run_items where scan_run_id = publication.active_run_id) as visible_items,
+                (select count(*)::int from price_history) as history_rows
+              from catalog_publications publication
+              join scan_runs run on run.id = publication.active_run_id
+              where publication.shop_id = 'aboutyou-cz' and publication.market = 'CZ'
+            `;
+            const row = rows[0];
+            if (!row || Number(row.visible_items) < 1000 || Number(row.product_count) < 1000) {
+              throw new Error(`Catalog publication verification failed: ${JSON.stringify(row ?? null)}`);
+            }
+            console.log(`Published catalog OK: ${row.visible_items} items, ${row.history_rows} price-history rows`);
+          } finally {
+            await sql.end({ timeout: 2 });
+          }
+          NODE
