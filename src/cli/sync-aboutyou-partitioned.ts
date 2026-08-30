@@ -1,5 +1,6 @@
 import {
   buildAboutYouPartitionPlan,
+  inspectAboutYouCategory,
   type AboutYouPartition,
 } from "@/lib/aboutyou-partitions";
 import { collectAboutYouFullCatalog } from "@/lib/aboutyou-full-sync";
@@ -34,6 +35,10 @@ function numberArg(name: string, fallback: number) {
 
 function pct(value: number | null) {
   return value === null ? "?" : `${(value * 100).toFixed(2)} %`;
+}
+
+function count(value: number | null) {
+  return value === null ? "?" : value.toLocaleString("cs-CZ");
 }
 
 function richerProduct(existing: ScannedProduct | undefined, candidate: ScannedProduct) {
@@ -73,18 +78,20 @@ async function main() {
   }
 
   try {
+    const rootInspection = await inspectAboutYouCategory(startUrl);
+    rootReportedCount = rootInspection.reportedCount;
+    if (!rootReportedCount) throw new Error("ABOUT YOU root did not expose a trustworthy reported catalog count");
+    console.log(`Root reported catalog: ${count(rootReportedCount)}`);
+
     console.log("Plánuji category/brand partitions…");
     const plan = await buildAboutYouPartitionPlan({
       startUrl,
       splitAbove,
       maxPartitions,
       onInspect(inspection) {
-        if (new URL(inspection.url).pathname === new URL(startUrl).pathname && !new URL(inspection.url).search) {
-          rootReportedCount = inspection.reportedCount;
-        }
         console.log(
           `[plan] ${new URL(inspection.url).pathname}${new URL(inspection.url).search}` +
-          ` · expected ${inspection.reportedCount?.toLocaleString("cs-CZ") ?? "?"}` +
+          ` · expected ${count(inspection.reportedCount)}` +
           ` · children ${inspection.childCategories.length} · brands ${inspection.brandPartitions.length}`,
         );
       },
@@ -92,7 +99,7 @@ async function main() {
 
     if (plan.length === 0) throw new Error("Partition planner produced no crawlable leaves");
     console.log(`\nPartition leaves: ${plan.length.toLocaleString("cs-CZ")}`);
-    console.log(`Root reported catalog: ${rootReportedCount?.toLocaleString("cs-CZ") ?? "UNKNOWN"}\n`);
+    console.log(`Root reported catalog: ${count(rootReportedCount)}\n`);
 
     const globalProducts = new Map<string, ScannedProduct>();
     let completePartitions = 0;
@@ -154,7 +161,7 @@ async function main() {
 
         console.log(
           `${status === "complete" ? "✓" : "⚠"} ${result.products.length.toLocaleString("cs-CZ")}` +
-          ` / ${result.reportedProducts?.toLocaleString("cs-CZ") ?? "?"}` +
+          ` / ${count(result.reportedProducts)}` +
           ` · ${pct(result.coverage)} · ${result.stoppedBecause}`,
         );
       } catch (error) {
@@ -179,7 +186,7 @@ async function main() {
 
     console.log("\nPARTITIONED CATALOG RESULT");
     console.log(`Unique products: ${globalProducts.size.toLocaleString("cs-CZ")}`);
-    console.log(`Reported root: ${rootReportedCount?.toLocaleString("cs-CZ") ?? "?"}`);
+    console.log(`Reported root: ${count(rootReportedCount)}`);
     console.log(`Global coverage: ${pct(globalCoverage)}`);
     console.log(`Partitions: ${completePartitions}/${plan.length} complete · ${truncatedPartitions} truncated · ${failedPartitions} failed`);
     console.log(`Publishable: ${publishable ? "ANO" : "NE"}`);
