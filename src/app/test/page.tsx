@@ -49,6 +49,7 @@ export default async function TestPage() {
   try {
     const snapshot = await readCatalogHealth();
     const syncingSources = snapshot.sources.filter((source) => source.state === "syncing").length;
+    const priceRefreshReady = snapshot.sources.some((source) => source.partitionCount > 0);
 
     return (
       <main className={styles.page}>
@@ -58,8 +59,8 @@ export default async function TestPage() {
               <div className={styles.eyebrow}>PRICE INTELLIGENCE ENGINE</div>
               <h1>Data status</h1>
               <p>
-                Reálný stav publikovaných katalogů. Počty pocházejí z aktivní databázové publikace,
-                ne z hardcodovaných hodnot ve frontendu.
+                Reálný stav publikovaných katalogů, coverage a naplánovaných aktualizací.
+                Hodnoty pocházejí přímo z aktivní databázové publikace.
               </p>
             </div>
             <nav className={styles.actions} aria-label="Akce dashboardu">
@@ -86,8 +87,8 @@ export default async function TestPage() {
             </article>
             <article className={styles.summaryCard}>
               <span>Další automatický update</span>
-              <strong className={styles.dateValue}>Nenaplánován</strong>
-              <small>full sync je zatím spouštěný ručně</small>
+              <strong className={styles.dateValue}>{formatDate(snapshot.nextUpdateAt)}</strong>
+              <small>{priceRefreshReady ? "ceny každé 4 h · full katalog denně" : "nejdřív ověřený full katalog"}</small>
             </article>
           </section>
 
@@ -128,16 +129,23 @@ export default async function TestPage() {
                       <dd>{formatDate(source.publishedAt)}</dd>
                     </div>
                     <div>
-                      <dt>Délka posledního syncu</dt>
+                      <dt>Délka posledního full syncu</dt>
                       <dd>{formatDuration(source)}</dd>
                     </div>
                     <div>
                       <dt>Coverage katalogu</dt>
-                      <dd className={styles.warningValue}>{source.coverageLabel}</dd>
+                      <dd className={source.coverageLabel === "Neověřeno" ? styles.warningValue : undefined}>
+                        {source.coverageLabel}
+                      </dd>
+                      <span className={styles.detailHint}>
+                        {source.partitionCount > 0
+                          ? `${numberFormatter.format(source.partitionCount)} ověřených partitionů`
+                          : "starší publikace bez partition coverage"}
+                      </span>
                     </div>
                     <div>
                       <dt>Další update</dt>
-                      <dd>{source.nextUpdateAt ? formatDate(source.nextUpdateAt) : "Nenaplánován"}</dd>
+                      <dd>{formatDate(source.nextUpdateAt)}</dd>
                       <span className={styles.detailHint}>{source.scheduleLabel}</span>
                     </div>
                   </dl>
@@ -154,11 +162,11 @@ export default async function TestPage() {
           <aside className={styles.notice}>
             <div className={styles.noticeIcon}>!</div>
             <div>
-              <strong>Coverage držíme odděleně od počtu produktů.</strong>
+              <strong>Neúplný crawl už nový katalog nikdy nepřepíše.</strong>
               <p>
-                Publikovaných 1 003 položek může být technicky perfektní dataset a zároveň neúplný katalog.
-                Dokud neumíme porovnat discovery proti očekávanému rozsahu zdroje, dashboard záměrně ukazuje
-                coverage jako „Neověřeno“ místo falešných 100 %.
+                Aktivní starší publikace může ještě zobrazovat coverage „Neověřeno“. Nový partitioned full sync
+                se publikuje až po dokončení všech partitionů a dosažení minimálně 99,5 % reported katalogu.
+                Price refresh se následně spouští každé 4 hodiny a zapisuje historii jen při skutečné změně ceny.
               </p>
             </div>
           </aside>
