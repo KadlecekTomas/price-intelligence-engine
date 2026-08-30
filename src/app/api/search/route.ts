@@ -169,7 +169,7 @@ export async function GET(request: Request) {
     const offers = maxPrice === null
       ? market.offers
       : market.offers.filter((offer) => offer.priceCzk <= maxPrice);
-    const candidateCount = market.sources.reduce((sum, source) => sum + source.candidateCount, 0);
+    const catalogCount = market.sources.reduce((sum, source) => sum + source.catalogCount, 0);
     const naturalIntent = applySearchParamOverrides(parseNaturalSearch(query), url.searchParams);
     const warnings = [...market.warnings];
     if (
@@ -193,7 +193,7 @@ export async function GET(request: Request) {
       results: [],
       nearMatches: [],
       source: "market",
-      scannedProducts: candidateCount,
+      scannedProducts: catalogCount,
       persistedProducts: 0,
       liveProducts: 0,
       liveBatches: 0,
