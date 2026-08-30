@@ -1,0 +1,334 @@
+.marketMode {
+  padding: 22px 0 8px;
+}
+
+.marketIntro {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(340px, .8fr);
+  gap: 18px;
+  align-items: end;
+  padding: 22px;
+  border: 1px solid rgba(182,255,104,.22);
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(182,255,104,.075), rgba(15,20,27,.94) 44%);
+}
+
+.marketIntro h2 {
+  margin: 0;
+  font-size: clamp(30px, 4vw, 50px);
+  line-height: 1;
+  letter-spacing: -.055em;
+  text-transform: capitalize;
+}
+
+.marketIntro > div:first-child > p:last-child {
+  margin: 13px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  max-width: 690px;
+}
+
+.marketHeadlineStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.marketHeadlineStats div {
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid rgba(37,45,56,.9);
+  border-radius: 13px;
+  background: rgba(8,12,17,.75);
+}
+
+.marketHeadlineStats strong {
+  display: block;
+  font-size: 18px;
+  letter-spacing: -.035em;
+}
+
+.marketHeadlineStats span {
+  display: block;
+  margin-top: 5px;
+  color: #778393;
+  font-size: 9px;
+  line-height: 1.3;
+}
+
+.marketSources {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 9px;
+  margin-top: 10px;
+}
+
+.marketSource {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: rgba(12,17,23,.8);
+}
+
+.marketSource > div {
+  min-width: 0;
+}
+
+.marketSource strong {
+  display: block;
+  font-size: 12px;
+}
+
+.marketSource span,
+.marketSource p {
+  color: #727e8d;
+  font-size: 9px;
+}
+
+.marketSource span {
+  display: block;
+  margin-top: 3px;
+}
+
+.marketSource p {
+  margin: 0;
+  text-align: right;
+  max-width: 160px;
+  line-height: 1.35;
+}
+
+.marketSource-ok {
+  border-color: rgba(182,255,104,.15);
+}
+
+.marketSource-failed {
+  border-color: rgba(255,116,116,.22);
+}
+
+.marketSource-failed p {
+  color: #e69a9a;
+}
+
+.marketBest {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 3px 18px;
+  margin-top: 14px;
+  padding: 18px 20px;
+  border: 1px solid rgba(182,255,104,.28);
+  border-radius: 16px;
+  background: rgba(182,255,104,.07);
+}
+
+.marketBest > span {
+  color: #caff99;
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: .1em;
+}
+
+.marketBest > strong {
+  grid-row: 1 / 3;
+  grid-column: 2;
+  font-size: 31px;
+  letter-spacing: -.055em;
+}
+
+.marketBest p {
+  margin: 2px 0 0;
+  color: #939eab;
+  font-size: 11px;
+}
+
+.marketEmpty {
+  margin-top: 14px;
+  padding: 24px;
+  border: 1px solid rgba(255,214,107,.2);
+  border-radius: 17px;
+  background: rgba(255,214,107,.04);
+}
+
+.marketEmpty h3 {
+  margin: 0 0 8px;
+  font-size: 20px;
+  letter-spacing: -.03em;
+}
+
+.marketEmpty > p:last-child {
+  margin: 0;
+  color: #948c72;
+  font-size: 11px;
+  line-height: 1.55;
+  max-width: 760px;
+}
+
+.marketOfferList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.marketOffer {
+  display: flex;
+  flex-direction: column;
+  min-height: 275px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(20,26,35,.95), rgba(12,17,24,.98));
+}
+
+.marketOffer-best {
+  border-color: rgba(182,255,104,.28);
+  box-shadow: inset 0 1px 0 rgba(182,255,104,.08);
+}
+
+.marketOfferHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.marketOfferHead > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.marketShop {
+  color: #d9e1ea;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.marketOfferHead b {
+  padding: 4px 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: #caff99;
+  font-size: 8px;
+  letter-spacing: .06em;
+}
+
+.marketAvailability {
+  color: #8d98a7;
+  font-size: 9px;
+  text-align: right;
+}
+
+.marketAvailability-available {
+  color: #bffb91;
+}
+
+.marketOffer h3 {
+  margin: 20px 0 8px;
+  font-size: 18px;
+  line-height: 1.3;
+  letter-spacing: -.025em;
+}
+
+.marketPriceRow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.marketPriceRow strong {
+  font-size: 28px;
+  letter-spacing: -.05em;
+}
+
+.marketPriceRow span {
+  color: #6e7987;
+  font-size: 10px;
+}
+
+.marketOfferMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 15px;
+}
+
+.marketOfferMeta span {
+  padding: 5px 7px;
+  border: 1px solid #222b36;
+  border-radius: 7px;
+  background: #090e14;
+  color: #7f8a99;
+  font-size: 9px;
+}
+
+.marketOfferFoot {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid rgba(37,45,56,.7);
+}
+
+.marketOfferFoot span {
+  color: #616d7b;
+  font-size: 9px;
+}
+
+.marketOfferFoot a {
+  color: var(--text);
+  text-decoration: none;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.marketOfferFoot a:hover {
+  color: var(--accent);
+}
+
+@media (max-width: 900px) {
+  .marketIntro {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+}
+
+@media (max-width: 680px) {
+  .marketIntro {
+    padding: 17px;
+  }
+
+  .marketHeadlineStats {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .marketHeadlineStats div:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .marketSource {
+    align-items: flex-start;
+  }
+
+  .marketBest {
+    grid-template-columns: 1fr;
+  }
+
+  .marketBest > strong {
+    grid-row: auto;
+    grid-column: auto;
+    margin-top: 4px;
+  }
+
+  .marketOfferList {
+    grid-template-columns: 1fr;
+  }
+}

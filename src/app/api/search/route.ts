@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { fetchLiveAboutYouCatalog } from "@/adapters/aboutyou-cz-live";
+import { parseMarketSearchIntent } from "@/domain/market-search";
 import {
   fold,
   parseNaturalSearch,
@@ -11,6 +12,7 @@ import { applySearchParamOverrides } from "@/domain/search-overrides";
 import { sizeAvailabilityFromText } from "@/domain/size-availability";
 import { databaseConfigured, readLatestProducts } from "@/lib/database";
 import { discoveryState, type ScannedProduct } from "@/lib/discovery-state";
+import { searchMarket } from "@/lib/market-search";
 import { readPublicProducts } from "@/lib/supabase-read";
 
 export const dynamic = "force-dynamic";
@@ -135,6 +137,19 @@ function buildNearMatches(
     .slice(0, limit);
 }
 
+function structuredMarketSize(value: string | null) {
+  if (!value) return null;
+  const normalized = value.trim().toUpperCase().replace(".", ",").replace(/\s+/g, "");
+  if (/^(?:3[5-9]|4[0-9]|5[0-2])(?:,(?:3|5|7))?$/.test(normalized)) return normalized;
+  return null;
+}
+
+function structuredMaxPrice(value: string | null) {
+  if (!value) return null;
+  const parsed = Number(value.replace(/[^0-9]/g, ""));
+  return Number.isFinite(parsed) && parsed >= 100 ? parsed : null;
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const query = (url.searchParams.get("q") ?? "").slice(0, 500);
@@ -142,6 +157,54 @@ export async function GET(request: Request) {
   const limit = Number.isFinite(requestedLimit)
     ? Math.max(1, Math.min(Math.round(requestedLimit), 60))
     : 36;
+
+  const marketIntent = parseMarketSearchIntent(query);
+  if (marketIntent.exactProduct) {
+    const explicitSize = structuredMarketSize(url.searchParams.get("size"));
+    if (explicitSize) marketIntent.size = explicitSize;
+    if (url.searchParams.get("sort") === "price") marketIntent.sort = "cheapest";
+
+    const market = await searchMarket(marketIntent);
+    const maxPrice = structuredMaxPrice(url.searchParams.get("maxPrice"));
+    const offers = maxPrice === null
+      ? market.offers
+      : market.offers.filter((offer) => offer.priceCzk <= maxPrice);
+    const catalogCount = market.sources.reduce((sum, source) => sum + source.catalogCount, 0);
+    const naturalIntent = applySearchParamOverrides(parseNaturalSearch(query), url.searchParams);
+    const warnings = [...market.warnings];
+    if (
+      url.searchParams.has("category")
+      || url.searchParams.has("color")
+      || url.searchParams.has("material")
+      || url.searchParams.has("quality")
+    ) {
+      warnings.unshift("Při hledání konkrétního modelu používáme market režim. Kategorie, barva, materiál a quality filtr se zatím na market nabídky nepřenášejí; velikost a cenový limit ano.");
+    }
+
+    return NextResponse.json({
+      mode: "market",
+      query,
+      intent: naturalIntent,
+      marketIntent,
+      market: {
+        ...market,
+        offers: offers.slice(0, limit),
+      },
+      results: [],
+      nearMatches: [],
+      source: "market",
+      scannedProducts: catalogCount,
+      persistedProducts: 0,
+      liveProducts: 0,
+      liveBatches: 0,
+      resultCount: offers.length,
+      nearMatchCount: 0,
+      liveSourceUrl: null,
+      liveSourceUrls: [],
+      liveFetchedAt: null,
+      warnings,
+    });
+  }
 
   const intent = applySearchParamOverrides(parseNaturalSearch(query), url.searchParams);
   let persistedProducts = discoveryState.products;
@@ -189,9 +252,6 @@ export async function GET(request: Request) {
       liveProductIds = live.products.map((product) => product.id);
       liveBatches = live.batchCount;
 
-      // The live adapter already narrows the public category by verified ABOUT YOU filters.
-      // Search the union more permissively so partial/broad batches can fill the shortlist,
-      // then explicitly mark any unverified constraint instead of pretending it is known.
       const liveIntent: SearchIntent = {
         ...intent,
         color: null,
@@ -274,6 +334,7 @@ export async function GET(request: Request) {
   ]).size;
 
   return NextResponse.json({
+    mode: "discovery",
     query,
     intent,
     results,
