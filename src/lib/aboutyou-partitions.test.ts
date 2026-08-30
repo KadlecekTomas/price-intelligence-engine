@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildAboutYouPartitionPlan,
   categoryDepth,
   extractAboutYouPartitionLinks,
   inspectAboutYouCategoryHtml,
@@ -11,7 +12,7 @@ import {
 test("root category extracts only direct men's category children", () => {
   const html = `
     <html><body>
-      <div>107 718</div>
+      <h1>Móda pro muže</h1><div>107 718</div><div>Zobrazit</div>
       <a href="/c/muzi/obleceni-20290">Oblečení</a>
       <a href="/c/muzi/boty-20215">Boty</a>
       <a href="/c/muzi/obleceni/tricka-20331">Nested</a>
@@ -48,7 +49,7 @@ test("nested category extracts direct children and canonical brand shards", () =
   const current = "https://www.aboutyou.cz/c/muzi/obleceni-20290";
   const html = `
     <html><body>
-      <div>85 002</div>
+      <h1>Oblečení pro muže</h1><div>85 002</div><div>Zobrazit</div>
       <a href="/c/muzi/obleceni/tricka-20331">Trička</a>
       <a href="/c/muzi/obleceni/tricka/tricka-s-kratkym-rukavem-20991">Too deep</a>
       <a href="/c/muzi/obleceni-20290?brand=nike-272&foo=bar">Nike</a>
@@ -60,6 +61,43 @@ test("nested category extracts direct children and canonical brand shards", () =
     "https://www.aboutyou.cz/c/muzi/obleceni-20290?brand=adidas-187",
     "https://www.aboutyou.cz/c/muzi/obleceni-20290?brand=nike-272",
   ]);
+});
+
+test("oversized terminal category stays a category instead of using incomplete visible brand links", async () => {
+  const root = "https://www.aboutyou.cz/c/muzi-20202";
+  const terminal = "https://www.aboutyou.cz/c/muzi/obleceni/tricka-20331";
+  const plan = await buildAboutYouPartitionPlan({
+    startUrl: root,
+    splitAbove: 850,
+    inspect: async (url) => {
+      if (url === root) {
+        return {
+          url,
+          reportedCount: 10_000,
+          childCategories: [terminal],
+          brandPartitions: [],
+        };
+      }
+      return {
+        url,
+        reportedCount: 4_500,
+        childCategories: [],
+        brandPartitions: [
+          `${terminal}?brand=nike-272`,
+          `${terminal}?brand=adidas-187`,
+        ],
+      };
+    },
+  });
+
+  assert.deepEqual(plan, [{
+    key: "/c/muzi/obleceni/tricka-20331",
+    url: terminal,
+    type: "category",
+    parentKey: "/c/muzi-20202",
+    depth: 4,
+    expectedCount: 4_500,
+  }]);
 });
 
 test("partition identity is stable across brand ordering", () => {
