@@ -7,6 +7,7 @@ import {
   type SearchIntent,
   type SearchResult,
 } from "@/domain/natural-search";
+import { applySearchParamOverrides } from "@/domain/search-overrides";
 import { sizeAvailabilityFromText } from "@/domain/size-availability";
 import { databaseConfigured, readLatestProducts } from "@/lib/database";
 import { discoveryState, type ScannedProduct } from "@/lib/discovery-state";
@@ -142,7 +143,7 @@ export async function GET(request: Request) {
     ? Math.max(1, Math.min(Math.round(requestedLimit), 60))
     : 36;
 
-  const intent = parseNaturalSearch(query);
+  const intent = applySearchParamOverrides(parseNaturalSearch(query), url.searchParams);
   let persistedProducts = discoveryState.products;
   let persistedSource: "postgres" | "memory" = "memory";
 
