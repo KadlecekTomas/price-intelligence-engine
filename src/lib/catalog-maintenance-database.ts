@@ -1,6 +1,15 @@
 import postgres from "postgres";
 import type { AboutYouPartition } from "@/lib/aboutyou-partitions";
 
+type MaintenanceJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | MaintenanceJsonValue[]
+  | { [key: string]: MaintenanceJsonValue };
+type MaintenanceJsonObject = { [key: string]: MaintenanceJsonValue };
+
 const globalMaintenanceDb = globalThis as typeof globalThis & {
   __priceIntelligenceMaintenanceSql?: ReturnType<typeof postgres>;
   __priceIntelligenceMaintenanceSchema?: Promise<void>;
@@ -77,7 +86,7 @@ export async function upsertPartitionState(input: {
   expectedCount?: number | null;
   discoveredCount?: number;
   error?: string | null;
-  metadata?: Record<string, unknown>;
+  metadata?: MaintenanceJsonObject;
 }) {
   await ensureMaintenanceSchema();
   const sql = client();
@@ -113,7 +122,7 @@ export async function finalizeCatalogRun(input: {
   observedProductCount: number;
   coverage: number | null;
   stopReason: string;
-  metadata?: Record<string, unknown>;
+  metadata?: MaintenanceJsonObject;
   discardStaging?: boolean;
 }) {
   await ensureMaintenanceSchema();
@@ -141,17 +150,17 @@ export async function readActiveCatalogPartitions(shopId: string, market: string
   const sql = client();
   const rows = await sql`
     SELECT
-      partition_key,
-      partition_url,
-      partition_type,
-      expected_count,
-      discovered_count
-    FROM catalog_scan_partitions partition
-    JOIN catalog_publications publication ON publication.active_run_id = partition.scan_run_id
+      p.partition_key,
+      p.partition_url,
+      p.partition_type,
+      p.expected_count,
+      p.discovered_count
+    FROM catalog_scan_partitions p
+    JOIN catalog_publications publication ON publication.active_run_id = p.scan_run_id
     WHERE publication.shop_id = ${shopId}
       AND publication.market = ${market}
-      AND partition.status = 'complete'
-    ORDER BY partition.partition_key
+      AND p.status = 'complete'
+    ORDER BY p.partition_key
   ` as unknown as Array<{
     partition_key: string;
     partition_url: string;
