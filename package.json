@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test src/**/*.test.ts",
     "scan": "tsx src/cli/scan.ts",
-    "sync:aboutyou": "tsx src/cli/sync-aboutyou.ts"
+    "sync:aboutyou": "tsx src/cli/sync-aboutyou.ts",
+    "probe:aboutyou-stream": "tsx src/cli/probe-aboutyou-stream.ts"
   },
   "dependencies": {
     "cheerio": "^1.1.2",
