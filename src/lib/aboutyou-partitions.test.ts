@@ -45,6 +45,30 @@ test("root planning keeps product taxonomy roots and drops overlapping merchandi
   ]);
 });
 
+test("nested planning removes merchandising subsets but keeps product taxonomy", () => {
+  const current = "https://www.aboutyou.cz/c/muzi/obleceni-20290";
+  const selected = selectPartitionChildren(current, [
+    "https://www.aboutyou.cz/c/muzi/obleceni/nove-78093",
+    "https://www.aboutyou.cz/c/muzi/obleceni/oblibene-99901",
+    "https://www.aboutyou.cz/c/muzi/obleceni/prilezitosti-99902",
+    "https://www.aboutyou.cz/c/muzi/obleceni/nadmerne-velikosti-99903",
+    "https://www.aboutyou.cz/c/muzi/obleceni/tricka-20331",
+    "https://www.aboutyou.cz/c/muzi/obleceni/dziny-20332",
+  ]);
+  assert.deepEqual(selected, [
+    "https://www.aboutyou.cz/c/muzi/obleceni/tricka-20331",
+    "https://www.aboutyou.cz/c/muzi/obleceni/dziny-20332",
+  ]);
+});
+
+test("category with only overlapping child views is crawled directly", () => {
+  const current = "https://www.aboutyou.cz/c/muzi/obleceni/tricka-20331";
+  assert.deepEqual(selectPartitionChildren(current, [
+    "https://www.aboutyou.cz/c/muzi/obleceni/tricka/nove-78093",
+    "https://www.aboutyou.cz/c/muzi/obleceni/tricka/oblibene-99901",
+  ]), []);
+});
+
 test("nested category extracts direct children and canonical brand shards", () => {
   const current = "https://www.aboutyou.cz/c/muzi/obleceni-20290";
   const html = `
