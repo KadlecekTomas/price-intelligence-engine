@@ -1,0 +1,247 @@
+.filterGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(37,45,56,.75);
+}
+
+.filterGrid label {
+  margin: 0;
+}
+
+.filterGrid label > span {
+  display: block;
+  margin: 0 0 6px 2px;
+  color: #7f8b9a;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.filterGrid select,
+.filterGrid input {
+  width: 100%;
+  height: 44px;
+  border: 1px solid #2b3542;
+  border-radius: 11px;
+  outline: 0;
+  background: #090d12;
+  color: var(--text);
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.filterGrid select:focus,
+.filterGrid input:focus {
+  border-color: rgba(182,255,104,.55);
+  box-shadow: 0 0 0 3px rgba(182,255,104,.07);
+}
+
+.priceInput {
+  position: relative;
+}
+
+.priceInput input {
+  padding-right: 38px;
+}
+
+.priceInput em {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  color: #6d7886;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+  pointer-events: none;
+}
+
+.searchTools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.qualityToggle {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 8px;
+  margin: 0 !important;
+  color: #aab4c0 !important;
+  font-size: 11px !important;
+  cursor: pointer;
+}
+
+.qualityToggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.resetButton,
+.searchError button {
+  border: 1px solid #313b48;
+  border-radius: 10px;
+  background: #0a0f15;
+  color: #c4ceda;
+  padding: 8px 11px;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.resetButton:hover,
+.searchError button:hover {
+  color: var(--text);
+  border-color: #485465;
+}
+
+.examples {
+  align-items: center;
+}
+
+.examples > span {
+  color: #66717f;
+  font-size: 10px;
+  font-weight: 800;
+  padding-left: 2px;
+}
+
+.coverageStrip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, auto)) 1fr;
+  gap: 10px;
+  align-items: stretch;
+  margin: 14px 0 4px;
+}
+
+.coverageStrip > div {
+  min-width: 132px;
+  padding: 10px 12px;
+  border: 1px solid rgba(37,45,56,.75);
+  border-radius: 12px;
+  background: rgba(10,15,21,.7);
+}
+
+.coverageStrip > div span {
+  display: block;
+  color: #66717f;
+  font-size: 9px;
+  margin-bottom: 4px;
+}
+
+.coverageStrip > div strong {
+  font-size: 13px;
+}
+
+.coverageStrip p {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 2px solid rgba(255,214,107,.35);
+  color: #7e8997;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.refreshingDot {
+  color: #b9ff7d;
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: .04em;
+}
+
+.searchError {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.searchError > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.searchError strong {
+  color: #ffd0d0;
+  font-size: 13px;
+}
+
+.searchError span {
+  color: #ffaaaa;
+  font-size: 11px;
+}
+
+.searchWarnings {
+  margin: 14px 0;
+  padding: 13px 15px;
+  border: 1px solid rgba(255,214,107,.18);
+  border-radius: 13px;
+  background: rgba(255,214,107,.045);
+}
+
+.searchWarnings p {
+  margin: 0;
+  color: #b7aa7f;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.searchWarnings p + p {
+  margin-top: 6px;
+}
+
+@media (max-width: 900px) {
+  .filterGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .coverageStrip {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .coverageStrip p {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 680px) {
+  .filterGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .searchTools {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .resetButton {
+    width: 100%;
+  }
+
+  .coverageStrip {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .coverageStrip > div:last-of-type {
+    grid-column: 1 / -1;
+  }
+
+  .coverageStrip p {
+    grid-column: 1 / -1;
+  }
+
+  .searchError {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .searchError button {
+    width: 100%;
+  }
+}
