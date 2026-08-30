@@ -4,6 +4,7 @@ import { parseReportedCatalogCount } from "@/lib/catalog-coverage";
 const ABOUTYOU_HOST = "www.aboutyou.cz";
 const MEN_ROOT_PATH = "/c/muzi-20202";
 const MEN_CATEGORY_PREFIX = "/c/muzi/";
+const PRIMARY_ROOT_CATEGORY = /^\/c\/muzi\/(?:obleceni|boty|sport|doplnky)-\d+$/;
 
 const HEADERS = {
   Accept: "text/html,application/xhtml+xml",
@@ -54,6 +55,13 @@ export function partitionKey(urlValue: string) {
 export function categoryDepth(urlValue: string) {
   const url = new URL(urlValue);
   return url.pathname.split("/").filter(Boolean).length;
+}
+
+export function selectPartitionChildren(currentUrl: string, childCategories: string[]) {
+  const current = new URL(currentUrl);
+  if (current.pathname !== MEN_ROOT_PATH) return childCategories;
+  const primary = childCategories.filter((value) => PRIMARY_ROOT_CATEGORY.test(new URL(value).pathname));
+  return primary.length >= 3 ? primary : childCategories;
 }
 
 export function extractAboutYouPartitionLinks(html: string, currentUrl: string) {
@@ -149,9 +157,10 @@ export async function buildAboutYouPartitionPlan(options: {
     const depth = categoryDepth(next.url);
     const expectedCount = inspection.reportedCount;
     const shouldSplit = expectedCount === null || expectedCount > splitAbove;
+    const categoryChildren = selectPartitionChildren(next.url, inspection.childCategories);
 
-    if (shouldSplit && depth < maxDepth && inspection.childCategories.length > 0) {
-      for (const child of inspection.childCategories) queue.push({ url: child, parentKey: key });
+    if (shouldSplit && depth < maxDepth && categoryChildren.length > 0) {
+      for (const child of categoryChildren) queue.push({ url: child, parentKey: key });
       continue;
     }
 
