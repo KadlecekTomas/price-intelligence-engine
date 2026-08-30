@@ -2,9 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { assessCatalogCoverage, parseReportedCatalogCount } from "@/lib/catalog-coverage";
 
-test("parseReportedCatalogCount reads standalone Czech catalog totals", () => {
+test("parseReportedCatalogCount reads ABOUT YOU category total from semantic context", () => {
   const text = "Móda pro muže\n107 718\nZobrazit\n3 249 Kč";
   assert.equal(parseReportedCatalogCount(text), 107_718);
+});
+
+test("parseReportedCatalogCount ignores larger unrelated six-digit values", () => {
+  const text = "tracking 493 493 campaign\nMóda pro muže\n111 904\nZobrazit\n3 249 Kč";
+  assert.equal(parseReportedCatalogCount(text), 111_904);
+});
+
+test("parseReportedCatalogCount refuses ambiguous unlabelled totals", () => {
+  const text = "111 904\n493 493\n3 249 Kč";
+  assert.equal(parseReportedCatalogCount(text), null);
 });
 
 test("incomplete stagnant crawl can never be published", () => {
