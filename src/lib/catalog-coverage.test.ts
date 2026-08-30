@@ -7,6 +7,11 @@ test("parseReportedCatalogCount reads ABOUT YOU category total from semantic con
   assert.equal(parseReportedCatalogCount(text), 107_718);
 });
 
+test("parseReportedCatalogCount reads arbitrary nested men's category total", () => {
+  const text = "Běžecké boty pro muže\n4 812\nZobrazit\n2 699 Kč";
+  assert.equal(parseReportedCatalogCount(text), 4_812);
+});
+
 test("parseReportedCatalogCount ignores larger unrelated six-digit values", () => {
   const text = "tracking 493 493 campaign\nMóda pro muže\n111 904\nZobrazit\n3 249 Kč";
   assert.equal(parseReportedCatalogCount(text), 111_904);
