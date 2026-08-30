@@ -1,3 +1,4 @@
+import { chromium } from "playwright";
 import {
   buildAboutYouPartitionPlan,
   inspectAboutYouCategory,
@@ -66,6 +67,7 @@ async function main() {
   const configuredMaxSteps = intArg("max-steps", 350);
   const scrollDelayMs = intArg("delay", 450);
   const minimumCoverage = numberArg("min-coverage", 0.995);
+  const concurrency = Math.max(1, Math.min(intArg("concurrency", 3), 6));
   const runId = `aboutyou-partitioned-${new Date().toISOString().replace(/[:.]/g, "-")}`;
   const run: FullSyncRun = {
     runId,
@@ -77,6 +79,7 @@ async function main() {
   console.log("\nPrice Intelligence — ABOUT YOU partitioned full catalog sync");
   console.log(`Run: ${runId}`);
   console.log(`Split above: ${splitAbove.toLocaleString("cs-CZ")} · publication coverage: ${(minimumCoverage * 100).toFixed(2)} %`);
+  console.log(`Parallel partition workers: ${concurrency}`);
   console.log(dryRun ? "Mode: DRY RUN\n" : "Mode: PostgreSQL atomic publication\n");
 
   let rootReportedCount: number | null = null;
@@ -114,96 +117,115 @@ async function main() {
     let completePartitions = 0;
     let truncatedPartitions = 0;
     let failedPartitions = 0;
+    let nextIndex = 0;
 
-    for (let index = 0; index < plan.length; index += 1) {
-      const partition: AboutYouPartition = plan[index];
-      const label = `[${index + 1}/${plan.length}] ${partition.key}`;
-      console.log(`\n${label}`);
-      if (!dryRun) await upsertPartitionState({ runId, partition, status: "running" });
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const processPartition = async (index: number, workerId: number) => {
+        const partition: AboutYouPartition = plan[index];
+        const label = `[${index + 1}/${plan.length}] [worker ${workerId}] ${partition.key}`;
+        console.log(`\n${label}`);
+        if (!dryRun) await upsertPartitionState({ runId, partition, status: "running" });
 
-      try {
-        const collect = async (maxSteps: number): Promise<AboutYouFullSyncResult> => collectAboutYouFullCatalog({
-          startUrl: partition.url,
-          targetProducts: 200_000,
-          maxSteps,
-          scrollDelayMs,
-          minimumCoverage,
-          checkpointEvery: 500,
-          headless: true,
-          onCheckpoint: dryRun
-            ? undefined
-            : async (products) => {
-                await persistFullSyncProducts(run, products, 500);
+        try {
+          const collect = async (maxSteps: number): Promise<AboutYouFullSyncResult> => collectAboutYouFullCatalog({
+            startUrl: partition.url,
+            targetProducts: 200_000,
+            maxSteps,
+            scrollDelayMs,
+            minimumCoverage,
+            checkpointEvery: 500,
+            headless: true,
+            browser,
+            onCheckpoint: dryRun
+              ? undefined
+              : async (products) => {
+                  await persistFullSyncProducts(run, products, 500);
+                },
+          });
+
+          let partitionMaxSteps = stepBudget(partition.expectedCount, configuredMaxSteps);
+          console.log(`${label} · crawl budget ${partitionMaxSteps.toLocaleString("cs-CZ")} steps for expected ${count(partition.expectedCount)}`);
+          let result = await collect(partitionMaxSteps);
+          let local = assessCatalogCoverage({
+            observedProducts: result.products.length,
+            reportedProducts: result.reportedProducts,
+            stoppedBecause: result.stoppedBecause,
+            minimumCoverage,
+          });
+
+          // If the static planning count was missing/stale and the live page reveals
+          // a larger terminal category, retry once with a size-derived budget. This
+          // is deliberately bounded and only retries deterministic max-step truncation.
+          if (!local.publishable && result.stoppedBecause === "max-steps" && result.reportedProducts) {
+            const expanded = stepBudget(result.reportedProducts, partitionMaxSteps + 1);
+            if (expanded > partitionMaxSteps) {
+              console.warn(`↻ ${label} expanding from ${partitionMaxSteps} to ${expanded} steps (live reported ${count(result.reportedProducts)})`);
+              partitionMaxSteps = expanded;
+              result = await collect(partitionMaxSteps);
+              local = assessCatalogCoverage({
+                observedProducts: result.products.length,
+                reportedProducts: result.reportedProducts,
+                stoppedBecause: result.stoppedBecause,
+                minimumCoverage,
+              });
+            }
+          }
+
+          for (const product of result.products) {
+            globalProducts.set(product.id, richerProduct(globalProducts.get(product.id), product));
+          }
+
+          const status = local.publishable ? "complete" as const : "truncated" as const;
+          if (status === "complete") completePartitions += 1;
+          else truncatedPartitions += 1;
+
+          if (!dryRun) {
+            await upsertPartitionState({
+              runId,
+              partition,
+              status,
+              expectedCount: result.reportedProducts,
+              discoveredCount: result.products.length,
+              error: local.publishable ? null : local.reason,
+              metadata: {
+                coverage: result.coverage,
+                stopReason: result.stoppedBecause,
+                pageRequestsObserved: result.pageRequestsObserved,
+                steps: result.steps,
+                maxStepsBudget: partitionMaxSteps,
+                workerId,
               },
-        });
-
-        let partitionMaxSteps = stepBudget(partition.expectedCount, configuredMaxSteps);
-        console.log(`crawl budget: ${partitionMaxSteps.toLocaleString("cs-CZ")} steps for expected ${count(partition.expectedCount)}`);
-        let result = await collect(partitionMaxSteps);
-        let local = assessCatalogCoverage({
-          observedProducts: result.products.length,
-          reportedProducts: result.reportedProducts,
-          stoppedBecause: result.stoppedBecause,
-          minimumCoverage,
-        });
-
-        // If the static planning count was missing/stale and the live page reveals
-        // a larger terminal category, retry once with a size-derived budget. This
-        // is deliberately bounded and only retries deterministic max-step truncation.
-        if (!local.publishable && result.stoppedBecause === "max-steps" && result.reportedProducts) {
-          const expanded = stepBudget(result.reportedProducts, partitionMaxSteps + 1);
-          if (expanded > partitionMaxSteps) {
-            console.warn(`↻ expanding ${partition.key} from ${partitionMaxSteps} to ${expanded} steps (live reported ${count(result.reportedProducts)})`);
-            partitionMaxSteps = expanded;
-            result = await collect(partitionMaxSteps);
-            local = assessCatalogCoverage({
-              observedProducts: result.products.length,
-              reportedProducts: result.reportedProducts,
-              stoppedBecause: result.stoppedBecause,
-              minimumCoverage,
             });
           }
-        }
 
-        for (const product of result.products) {
-          globalProducts.set(product.id, richerProduct(globalProducts.get(product.id), product));
+          console.log(
+            `${status === "complete" ? "✓" : "⚠"} ${label} · ${result.products.length.toLocaleString("cs-CZ")}` +
+            ` / ${count(result.reportedProducts)}` +
+            ` · ${pct(result.coverage)} · ${result.stoppedBecause}`,
+          );
+        } catch (error) {
+          failedPartitions += 1;
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(`✗ ${label}: ${message}`);
+          if (!dryRun) {
+            await upsertPartitionState({ runId, partition, status: "failed", error: message }).catch(() => undefined);
+          }
         }
+      };
 
-        const status = local.publishable ? "complete" as const : "truncated" as const;
-        if (status === "complete") completePartitions += 1;
-        else truncatedPartitions += 1;
-
-        if (!dryRun) {
-          await upsertPartitionState({
-            runId,
-            partition,
-            status,
-            expectedCount: result.reportedProducts,
-            discoveredCount: result.products.length,
-            error: local.publishable ? null : local.reason,
-            metadata: {
-              coverage: result.coverage,
-              stopReason: result.stoppedBecause,
-              pageRequestsObserved: result.pageRequestsObserved,
-              steps: result.steps,
-              maxStepsBudget: partitionMaxSteps,
-            },
-          });
+      const worker = async (workerId: number) => {
+        while (true) {
+          const index = nextIndex;
+          nextIndex += 1;
+          if (index >= plan.length) return;
+          await processPartition(index, workerId);
         }
+      };
 
-        console.log(
-          `${status === "complete" ? "✓" : "⚠"} ${result.products.length.toLocaleString("cs-CZ")}` +
-          ` / ${count(result.reportedProducts)}` +
-          ` · ${pct(result.coverage)} · ${result.stoppedBecause}`,
-        );
-      } catch (error) {
-        failedPartitions += 1;
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(`✗ ${label}: ${message}`);
-        if (!dryRun) {
-          await upsertPartitionState({ runId, partition, status: "failed", error: message }).catch(() => undefined);
-        }
-      }
+      await Promise.all(Array.from({ length: Math.min(concurrency, plan.length) }, (_, index) => worker(index + 1)));
+    } finally {
+      await browser.close().catch(() => undefined);
     }
 
     const globalCoverage = coverageRatio(globalProducts.size, rootReportedCount);
@@ -234,7 +256,7 @@ async function main() {
         coverage: globalCoverage,
         stopReason: globalAssessment.reason,
         discardStaging: true,
-        metadata: { completePartitions, truncatedPartitions, failedPartitions, totalPartitions: plan.length },
+        metadata: { completePartitions, truncatedPartitions, failedPartitions, totalPartitions: plan.length, concurrency },
       });
       finalized = true;
       throw new Error(`Catalog publication blocked: ${globalAssessment.reason}`);
@@ -248,7 +270,7 @@ async function main() {
       observedProductCount: globalProducts.size,
       coverage: globalCoverage,
       stopReason: "all-partitions-complete",
-      metadata: { completePartitions, truncatedPartitions, failedPartitions, totalPartitions: plan.length },
+      metadata: { completePartitions, truncatedPartitions, failedPartitions, totalPartitions: plan.length, concurrency },
     });
     finalized = true;
     console.log("\n✓ New catalog published atomically.\n");
