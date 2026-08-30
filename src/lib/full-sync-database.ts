@@ -2,6 +2,7 @@ import postgres from "postgres";
 import type { ScannedProduct } from "@/lib/discovery-state";
 
 const DEFAULT_CHUNK_SIZE = 500;
+const PERSIST_RETRY_DELAYS_MS = [750, 1_500, 3_000];
 
 const globalFullSyncDb = globalThis as typeof globalThis & {
   __priceIntelligenceFullSyncSql?: ReturnType<typeof postgres>;
@@ -17,7 +18,7 @@ function client() {
     globalFullSyncDb.__priceIntelligenceFullSyncSql = postgres(connectionString, {
       max: 2,
       idle_timeout: 30,
-      connect_timeout: 15,
+      connect_timeout: 20,
       ssl: local ? false : "require",
     });
   }
@@ -279,6 +280,22 @@ async function persistChunk(run: FullSyncRun, products: ScannedProduct[]) {
   });
 }
 
+async function persistChunkWithRetry(run: FullSyncRun, products: ScannedProduct[]) {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt <= PERSIST_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      return await persistChunk(run, products);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= PERSIST_RETRY_DELAYS_MS.length) break;
+      const delay = PERSIST_RETRY_DELAYS_MS[attempt];
+      console.warn(`Catalog DB write failed; retrying in ${delay} ms (${attempt + 1}/${PERSIST_RETRY_DELAYS_MS.length})`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  throw lastError;
+}
+
 export async function persistFullSyncProducts(
   run: FullSyncRun,
   products: ScannedProduct[],
@@ -287,7 +304,7 @@ export async function persistFullSyncProducts(
   const size = Math.max(50, Math.min(Math.round(chunkSize), 1000));
   let persisted = 0;
   for (let offset = 0; offset < products.length; offset += size) {
-    persisted += await persistChunk(run, products.slice(offset, offset + size));
+    persisted += await persistChunkWithRetry(run, products.slice(offset, offset + size));
   }
   return persisted;
 }
