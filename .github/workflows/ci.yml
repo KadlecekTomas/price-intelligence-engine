@@ -14,6 +14,7 @@ jobs:
         with:
           node-version: 22
       - run: npm install
+      - run: npx tsx scripts/test-market-search-live.ts
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
