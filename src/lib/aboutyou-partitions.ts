@@ -135,12 +135,14 @@ export async function buildAboutYouPartitionPlan(options: {
   splitAbove?: number;
   maxDepth?: number;
   maxPartitions?: number;
+  inspect?: (url: string) => Promise<AboutYouCategoryInspection>;
   onInspect?: (inspection: AboutYouCategoryInspection) => void | Promise<void>;
 } = {}) {
   const startUrl = options.startUrl ?? `https://${ABOUTYOU_HOST}${MEN_ROOT_PATH}`;
   const splitAbove = Math.max(250, Math.min(options.splitAbove ?? 850, 5_000));
   const maxDepth = Math.max(1, Math.min(options.maxDepth ?? 8, 12));
   const maxPartitions = Math.max(10, Math.min(options.maxPartitions ?? 2_000, 5_000));
+  const inspect = options.inspect ?? inspectAboutYouCategory;
   const queue: Array<{ url: string; parentKey: string | null }> = [{ url: startUrl, parentKey: null }];
   const inspected = new Set<string>();
   const leaves: AboutYouPartition[] = [];
@@ -152,7 +154,7 @@ export async function buildAboutYouPartitionPlan(options: {
     inspected.add(key);
     if (inspected.size > maxPartitions) throw new Error(`Partition plan exceeded ${maxPartitions} inspected nodes`);
 
-    const inspection = await inspectAboutYouCategory(next.url);
+    const inspection = await inspect(next.url);
     await options.onInspect?.(inspection);
     const depth = categoryDepth(next.url);
     const expectedCount = inspection.reportedCount;
@@ -164,20 +166,12 @@ export async function buildAboutYouPartitionPlan(options: {
       continue;
     }
 
-    if (shouldSplit && inspection.brandPartitions.length > 0) {
-      for (const brandUrl of inspection.brandPartitions) {
-        leaves.push({
-          key: partitionKey(brandUrl),
-          url: brandUrl,
-          type: "brand",
-          parentKey: key,
-          depth: depth + 1,
-          expectedCount: null,
-        });
-      }
-      continue;
-    }
-
+    // Do not substitute a terminal category with the visible brand links. ABOUT
+    // YOU exposes only a merchandising subset of brands as anchors (typically
+    // top brands), not an exhaustive brand facet. Using those links as shards
+    // silently drops every product from non-visible brands. A terminal category
+    // is therefore always crawled directly; the sync worker scales its step
+    // budget from the category's reported product count.
     leaves.push({
       key,
       url: next.url,
