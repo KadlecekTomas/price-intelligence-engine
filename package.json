@@ -15,7 +15,8 @@
     "probe:aboutyou-stream": "tsx src/cli/probe-aboutyou-stream.ts",
     "probe:aboutyou-partitions": "tsx src/cli/probe-aboutyou-partitions.ts",
     "probe:zalando-market": "tsx src/cli/probe-zalando-market.ts",
-    "probe:sizeer-market": "tsx src/cli/probe-sizeer-market.ts"
+    "probe:sizeer-market": "tsx src/cli/probe-sizeer-market.ts",
+    "probe:buzz-market": "tsx src/cli/probe-buzz-market.ts"
   },
   "dependencies": {
     "cheerio": "^1.1.2",
