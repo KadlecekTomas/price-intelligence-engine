@@ -26,11 +26,11 @@ export function parseReportedCatalogCount(text: string) {
   const token = catalogCountToken();
 
   // ABOUT YOU renders the authoritative category total directly between the
-  // category heading and the filter/sort controls. Prefer that semantic context
-  // over arbitrary large numbers embedded elsewhere in the page (campaign IDs,
-  // timers, tracking payloads, etc.).
+  // category heading (typically "... pro muže") and filter/sort controls.
+  // Prefer that semantic context over arbitrary large numbers embedded elsewhere
+  // in the page (campaign IDs, timers, tracking payloads, etc.).
   const contextualPatterns = [
-    new RegExp(`(?:Móda pro muže|Oblečení pro muže|Boty pro muže|Doplňky pro muže|Sportovní móda[^\\n]{0,80}pro muže)[\\s\\n]*${token}[\\s\\n]*(?:Zobrazit|Třídění|Cena)`, "i"),
+    new RegExp(`(?:[^0-9]{2,120}pro\\s+muže)[\\s\\n]*${token}[\\s\\n]*(?:Zobrazit|Třídění|Cena)`, "i"),
     new RegExp(`(?:Produkty|Výsledky|Položky)\\s*:?\\s*${token}`, "i"),
   ];
 
