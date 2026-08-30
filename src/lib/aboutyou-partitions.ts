@@ -81,8 +81,7 @@ export function selectPartitionChildren(currentUrl: string, childCategories: str
     return primary.length >= 3 ? primary : childCategories;
   }
 
-  const taxonomyChildren = childCategories.filter((value) => !OVERLAPPING_CATEGORY_SLUGS.has(lastCategorySlug(value)));
-  return taxonomyChildren.length > 0 ? taxonomyChildren : childCategories;
+  return childCategories.filter((value) => !OVERLAPPING_CATEGORY_SLUGS.has(lastCategorySlug(value)));
 }
 
 export function extractAboutYouPartitionLinks(html: string, currentUrl: string) {
