@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { readCatalogHealth, type CatalogSourceHealth } from "@/lib/catalog-health";
+import { RefreshButton } from "./refresh-button";
 import styles from "./test.module.css";
 
 export const dynamic = "force-dynamic";
@@ -63,7 +64,7 @@ export default async function TestPage() {
             </div>
             <nav className={styles.actions} aria-label="Akce dashboardu">
               <Link href="/" className={styles.secondaryAction}>Zpět na web</Link>
-              <a href="/test" className={styles.primaryAction}>Obnovit data</a>
+              <RefreshButton />
             </nav>
           </header>
 
