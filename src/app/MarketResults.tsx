@@ -35,8 +35,10 @@ export type MarketSourceView = {
   shopId: string;
   shopName: string;
   status: "ok" | "partial" | "failed";
+  verification: "live" | "catalog-only" | "blocked";
   catalogCount: number;
-  candidateCount: number;
+  matchedCount: number;
+  checkedCount: number;
   offerCount: number;
   durationMs: number;
   warning: string | null;
@@ -61,11 +63,18 @@ function money(value: number | null | undefined) {
 
 function shopStatus(source: MarketSourceView) {
   if (source.status === "failed") return "zdroj nedostupný";
-  if (source.offerCount > 0) {
-    return `${source.offerCount} ${source.offerCount === 1 ? "živá nabídka" : "živé nabídky"}`;
+  if (source.verification === "blocked") {
+    return source.matchedCount > 0
+      ? `${source.matchedCount} shod v katalogu · cenu nelze serverově ověřit`
+      : "katalog načten · cenové ověření není dostupné";
   }
-  if (source.candidateCount > 0) return `${source.candidateCount} kandidátů, žádná potvrzená nabídka`;
-  return "model v aktivním katalogu nenalezen";
+  if (source.offerCount > 0) {
+    return `${source.offerCount} ${source.offerCount === 1 ? "cenově ověřená nabídka" : "cenově ověřené nabídky"}`;
+  }
+  if (source.matchedCount > 0) {
+    return `${source.matchedCount} shod v načteném katalogu · bez potvrzené nabídky`;
+  }
+  return "model v načteném katalogu nenalezen";
 }
 
 function sizeLabel(offer: MarketOfferView, requestedSize: string | null) {
@@ -77,7 +86,8 @@ function sizeLabel(offer: MarketOfferView, requestedSize: string | null) {
 
 export default function MarketResults({ intent, market, loading }: Props) {
   const catalogCount = market.sources.reduce((sum, source) => sum + source.catalogCount, 0);
-  const healthySources = market.sources.filter((source) => source.status !== "failed").length;
+  const liveSources = market.sources.filter((source) => source.verification === "live").length;
+  const matchedCount = market.sources.reduce((sum, source) => sum + source.matchedCount, 0);
   const bestOffer = market.offers[0] ?? null;
   const productLabel = [intent.brand, intent.model].filter(Boolean).join(" ");
 
@@ -88,14 +98,14 @@ export default function MarketResults({ intent, market, loading }: Props) {
           <p className="eyebrow">MARKET SEARCH</p>
           <h2>{productLabel || "Konkrétní produkt"}</h2>
           <p>
-            Procházíme aktivní katalogy připojených obchodů a staré vyprodané produktové stránky
-            nevydáváme za dostupnou nabídku.
+            Procházíme připojené katalogové zdroje, oddělujeme pouhou katalogovou shodu od skutečně
+            ověřené ceny a staré vyprodané stránky nevydáváme za živou nabídku.
           </p>
         </div>
         <div className="marketHeadlineStats">
-          <div><strong>{catalogCount.toLocaleString("cs-CZ")}</strong><span>aktivních katalogových URL</span></div>
-          <div><strong>{healthySources}/{market.sources.length}</strong><span>ověřených obchodů</span></div>
-          <div><strong>{market.offers.length}</strong><span>živých nabídek</span></div>
+          <div><strong>{catalogCount.toLocaleString("cs-CZ")}</strong><span>položek v načtených zdrojích</span></div>
+          <div><strong>{matchedCount}</strong><span>shod modelu</span></div>
+          <div><strong>{liveSources}/{market.sources.length}</strong><span>cenově ověřitelných zdrojů</span></div>
         </div>
       </div>
 
@@ -104,7 +114,9 @@ export default function MarketResults({ intent, market, loading }: Props) {
           <article className={`marketSource marketSource-${source.status}`} key={source.shopId}>
             <div>
               <strong>{source.shopName}</strong>
-              <span>{source.catalogCount.toLocaleString("cs-CZ")} aktivních produktů</span>
+              <span>
+                {source.catalogCount.toLocaleString("cs-CZ")} načtených položek · {source.matchedCount} shod · {source.checkedCount} ověřených detailů
+              </span>
             </div>
             <p>{shopStatus(source)}</p>
           </article>
@@ -113,17 +125,26 @@ export default function MarketResults({ intent, market, loading }: Props) {
 
       {bestOffer ? (
         <div className="marketBest">
-          <span>NEJLEVNĚJŠÍ POTVRZENÁ NABÍDKA</span>
+          <span>NEJLEVNĚJŠÍ Z OVĚŘENÝCH NABÍDEK</span>
           <strong>{money(bestOffer.priceCzk)}</strong>
           <p>{bestOffer.shopName} · {sizeLabel(bestOffer, intent.size)}</p>
         </div>
+      ) : matchedCount > 0 ? (
+        <div className="marketEmpty">
+          <p className="eyebrow">MODEL V KATALOGU NALEZEN</p>
+          <h3>Máme katalogové shody, ale žádný připojený zdroj nám teď nepotvrdil cenu jako živou nabídku.</h3>
+          <p>
+            Nehážeme sem cenu z vyhledávače ani ze staré stránky. Jakmile máme veřejný feed, čitelný listing
+            nebo jiný spolehlivý zdroj ceny, nabídka se zařadí automaticky.
+          </p>
+        </div>
       ) : (
         <div className="marketEmpty">
-          <p className="eyebrow">AKTUÁLNĚ BEZ ŽIVÉ NABÍDKY</p>
-          <h3>V připojených aktivních katalozích jsme tenhle model teď nenašli skladem.</h3>
+          <p className="eyebrow">AKTUÁLNĚ BEZ POTVRZENÉ SHODY</p>
+          <h3>V právě připojených katalogových zdrojích jsme tenhle model nenašli.</h3>
           <p>
-            To neznamená, že produkt nikde na českém trhu neexistuje. Znamená to, že ho žádný z právě
-            připojených a úspěšně ověřených zdrojů nepotvrdil jako aktuální nabídku.
+            To neznamená, že produkt nikde na českém trhu neexistuje. Znamená to jen, že ho zatím nepotvrdily
+            zdroje, které máme v tomto market režimu připojené.
           </p>
         </div>
       )}
@@ -135,7 +156,7 @@ export default function MarketResults({ intent, market, loading }: Props) {
               <div className="marketOfferHead">
                 <div>
                   <span className="marketShop">{offer.shopName}</span>
-                  {index === 0 ? <b>NEJLEVNĚJŠÍ</b> : null}
+                  {index === 0 ? <b>NEJLEVNĚJŠÍ OVĚŘENÁ</b> : null}
                 </div>
                 <span className={`marketAvailability marketAvailability-${offer.requestedSizeStatus}`}>
                   {sizeLabel(offer, intent.size)}
