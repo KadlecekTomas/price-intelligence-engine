@@ -32,7 +32,7 @@ function cleanTitle(text: string) {
     .replace(/\s+/g, " ")
     .replace(/\s+(?:Původně:|Poslední nejnižší cena:).*$/i, "")
     .replace(/\s+[0-9][0-9\s.]*\s*Kč.*$/i, "")
-    .replace(/^(?:(?:DEAL|VÝPRODEJ|OSOBNÍ KUPÓN|NOVÉ|EXKLUZIVNĚ|PRÉMIUM)\s+)+/i, "")
+    .replace(/^(?:Unisex\s+)?(?:(?:DEAL|VÝPRODEJ|OSOBNÍ KUPÓN|NOVÉ|EXKLUZIVNĚ|PRÉMIUM)\s+)*/i, "")
     .trim()
     .slice(0, 180);
 }
