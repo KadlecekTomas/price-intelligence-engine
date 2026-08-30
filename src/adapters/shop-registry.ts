@@ -1,4 +1,5 @@
 import { aboutYouCzMarketProvider } from "@/adapters/market/aboutyou-cz";
+import { buzzCzMarketProvider } from "@/adapters/market/buzz-cz";
 import { footshopCzMarketProvider } from "@/adapters/market/footshop-cz";
 import { queensCzMarketProvider } from "@/adapters/market/queens-cz";
 import { sizeerCzMarketProvider } from "@/adapters/market/sizeer-cz";
@@ -114,8 +115,8 @@ export const SHOP_REGISTRY: ShopRegistryEntry[] = [
     trackingMode: "on-demand",
     fullCatalog: false,
     priceRefreshMinutes: null,
-    marketProvider: null,
-    note: "Public product catalog confirmed; provider search transport still needs verification.",
+    marketProvider: buzzCzMarketProvider,
+    note: "Public collection/PDP provider implemented; promotion to active requires the live smoke gate to pass.",
   },
 ];
 
