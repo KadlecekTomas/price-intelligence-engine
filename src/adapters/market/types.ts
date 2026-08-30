@@ -3,6 +3,7 @@ import type { MarketSearchIntent } from "@/domain/market-search";
 
 export type MarketProviderSearchResult = {
   offers: MarketOffer[];
+  catalogCount: number;
   candidateCount: number;
   warning: string | null;
 };
