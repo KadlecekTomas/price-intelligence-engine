@@ -30,6 +30,11 @@ on:
         required: true
         default: "0.995"
         type: string
+      concurrency:
+        description: "Parallel partition workers (bounded to 1-6)"
+        required: true
+        default: "3"
+        type: string
 
 concurrency:
   group: aboutyou-full-catalog-sync
@@ -48,6 +53,7 @@ jobs:
       SYNC_MAX_STEPS: ${{ inputs.max_steps || '350' }}
       SYNC_DELAY: ${{ inputs.scroll_delay_ms || '450' }}
       MIN_COVERAGE: ${{ inputs.minimum_coverage || '0.995' }}
+      SYNC_CONCURRENCY: ${{ inputs.concurrency || '3' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -65,3 +71,4 @@ jobs:
           --max-steps="$SYNC_MAX_STEPS"
           --delay="$SYNC_DELAY"
           --min-coverage="$MIN_COVERAGE"
+          --concurrency="$SYNC_CONCURRENCY"
