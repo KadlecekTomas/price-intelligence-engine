@@ -1,17 +1,9 @@
-import { aboutYouCzMarketProvider } from "@/adapters/market/aboutyou-cz";
-import { footshopCzMarketProvider } from "@/adapters/market/footshop-cz";
-import { queensCzMarketProvider } from "@/adapters/market/queens-cz";
-import { zalandoCzMarketProvider } from "@/adapters/market/zalando-cz";
+import { ACTIVE_MARKET_PROVIDERS } from "@/adapters/shop-registry";
 import type { MarketProvider } from "@/adapters/market/types";
 import type { MarketOffer, MarketSearchResult, MarketSourceStatus } from "@/domain/market-offer";
 import type { MarketSearchIntent } from "@/domain/market-search";
 
-export const MARKET_PROVIDERS: MarketProvider[] = [
-  aboutYouCzMarketProvider,
-  zalandoCzMarketProvider,
-  footshopCzMarketProvider,
-  queensCzMarketProvider,
-];
+export const MARKET_PROVIDERS: MarketProvider[] = ACTIVE_MARKET_PROVIDERS;
 
 function dedupeOffers(offers: MarketOffer[]) {
   const deduped = new Map<string, MarketOffer>();
