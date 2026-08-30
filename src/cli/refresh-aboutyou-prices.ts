@@ -34,7 +34,9 @@ async function main() {
   const minimumPartitionCoverage = numberArg("min-partition-coverage", 0.98);
   const partitions = await readActiveCatalogPartitions("aboutyou-cz", "CZ");
   if (partitions.length === 0) {
-    throw new Error("No verified active catalog partitions exist yet. Run a successful partitioned full catalog sync first.");
+    console.log("Price refresh skipped — no verified active catalog partitions exist yet.");
+    console.log("A successful partitioned full catalog sync must publish first.");
+    return;
   }
 
   const runId = `aboutyou-prices-${new Date().toISOString().replace(/[:.]/g, "-")}`;
