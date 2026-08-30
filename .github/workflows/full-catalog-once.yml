@@ -1,0 +1,84 @@
+name: Full Catalog One Shot
+
+on:
+  push:
+    branches:
+      - feat/catalog-partitions-price-refresh
+    paths:
+      - .github/workflows/full-catalog-once.yml
+
+concurrency:
+  group: aboutyou-full-catalog-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    permissions:
+      contents: read
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+      - name: Validate sync secret
+        run: test -n "$DATABASE_URL" || (echo "DATABASE_URL GitHub secret is missing" && exit 1)
+      - name: Publish verified ABOUT YOU CZ men's catalog
+        run: >-
+          npm run sync:aboutyou:partitioned --
+          --url="https://www.aboutyou.cz/c/muzi-20202"
+          --split-above="850"
+          --max-steps="350"
+          --delay="450"
+          --min-coverage="0.995"
+          --concurrency="4"
+      - name: Verify active publication in PostgreSQL
+        run: |
+          node --input-type=module <<'NODE'
+          import postgres from "postgres";
+          const sql = postgres(process.env.DATABASE_URL, {
+            max: 1,
+            prepare: false,
+            connect_timeout: 15,
+            idle_timeout: 3,
+            ssl: "require",
+          });
+          try {
+            const rows = await sql`
+              select
+                publication.active_run_id,
+                run.status,
+                run.product_count,
+                run.reported_product_count,
+                run.coverage,
+                count(items.product_id)::integer as staged_products
+              from catalog_publications publication
+              join scan_runs run on run.id = publication.active_run_id
+              join catalog_run_items items on items.scan_run_id = publication.active_run_id
+              where publication.shop_id = 'aboutyou-cz'
+                and publication.market = 'CZ'
+              group by publication.active_run_id, run.status, run.product_count,
+                       run.reported_product_count, run.coverage
+            `;
+            const row = rows[0];
+            if (!row) throw new Error("No active ABOUT YOU catalog publication found");
+            const coverage = Number(row.coverage ?? 0);
+            const products = Number(row.staged_products ?? 0);
+            const reported = Number(row.reported_product_count ?? 0);
+            console.log(`ACTIVE RUN: ${row.active_run_id}`);
+            console.log(`STATUS: ${row.status}`);
+            console.log(`PRODUCTS: ${products}`);
+            console.log(`REPORTED: ${reported}`);
+            console.log(`COVERAGE: ${(coverage * 100).toFixed(2)}%`);
+            if (row.status !== "complete") throw new Error(`Active run status is ${row.status}`);
+            if (coverage < 0.995) throw new Error(`Published coverage ${(coverage * 100).toFixed(2)}% is below 99.5%`);
+            if (products < Math.floor(reported * 0.995)) throw new Error("Published product count is below coverage gate");
+          } finally {
+            await sql.end({ timeout: 3 });
+          }
+          NODE
