@@ -1,3 +1,5 @@
+import type { MarketVerification } from "@/adapters/market/types";
+
 export type OfferAvailability = "in_stock" | "out_of_stock" | "unknown";
 
 export type MarketOffer = {
@@ -27,8 +29,10 @@ export type MarketSourceStatus = {
   shopId: string;
   shopName: string;
   status: "ok" | "partial" | "failed";
+  verification: MarketVerification;
   catalogCount: number;
-  candidateCount: number;
+  matchedCount: number;
+  checkedCount: number;
   offerCount: number;
   durationMs: number;
   warning: string | null;
