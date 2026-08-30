@@ -39,8 +39,10 @@ jobs:
             await sql.end({ timeout: 2 });
           }
           NODE
+      - name: Verify public category partition discovery
+        run: npm run probe:aboutyou-partitions
       - run: npx playwright install --with-deps chromium
-      - name: Probe ABOUT YOU product stream structure
+      - name: Probe ABOUT YOU product stream transport
         run: npm run probe:aboutyou-stream
       - name: Collect at least 1,000 public products
         run: |
