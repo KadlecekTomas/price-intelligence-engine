@@ -1,2 +1,5 @@
-active: aboutyou-cz, zalando-cz, footshop-cz, queens-cz
-next: sizeer-cz, eobuv-cz, answear-cz, buzz-cz
+active: aboutyou-cz
+partial: footshop-cz, queens-cz
+live-gate: sizeer-cz
+blocked-candidate: zalando-cz
+next: eobuv-cz, answear-cz, buzz-cz
