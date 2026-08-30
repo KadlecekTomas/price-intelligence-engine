@@ -155,7 +155,7 @@ function productName(text: string) {
 
 function sourceLabel(data: SearchResponse | null) {
   if (!data) return "načítám";
-  if (data.source === "market") return "Footshop + Queens market";
+  if (data.source === "market") return "multi-shop market";
   if (data.source === "live-aboutyou") return "ABOUT YOU live";
   if (data.source === "hybrid") return "index + ABOUT YOU live";
   if (data.source === "postgres") return "uložený index";
@@ -196,7 +196,7 @@ function marketIntentChips(intent: MarketIntentView | undefined) {
   return [
     [intent.brand, intent.model].filter(Boolean).join(" "),
     intent.size ? `velikost ${intent.size}` : null,
-    intent.sort === "cheapest" ? "nejlevnější na trhu" : "nejlepší shoda na trhu",
+    intent.sort === "cheapest" ? "nejlevnější z ověřených nabídek" : "nejlepší ověřená shoda",
   ].filter((item): item is string => Boolean(item));
 }
 
@@ -378,7 +378,7 @@ export default function Home() {
             <strong>Price Intelligence</strong>
             <span>CZ fashion market search</span>
           </div>
-          <div className="shopStatus"><span /> ABOUT YOU discovery · Footshop + Queens market</div>
+          <div className="shopStatus"><span /> ABOUT YOU · Footshop · Queens</div>
         </nav>
 
         <div className="heroCopy">
@@ -518,7 +518,7 @@ export default function Home() {
           <span>{isMarket ? countLabel(resultCount, "živá nabídka", "živé nabídky", "živých nabídek") : countLabel(resultCount, "výsledek", "výsledky", "výsledků")}</span>
           <i />
           <strong>{candidateCount.toLocaleString("cs-CZ")}</strong>
-          <span>{isMarket ? "katalogových položek prověřeno" : countLabel(candidateCount, "kandidát", "kandidáti", "kandidátů")}</span>
+          <span>{isMarket ? "položek v načtených market zdrojích" : countLabel(candidateCount, "kandidát", "kandidáti", "kandidátů")}</span>
           <i />
           <span>{sourceLabel(data)}</span>
           {loading && data ? <b className="refreshingDot">obnovuji</b> : null}
@@ -528,13 +528,13 @@ export default function Home() {
       {isMarket ? (
         <section className="coverageStrip">
           <div><span>Market zdroje</span><strong>{marketHealthyCount}/{marketSourceCount}</strong></div>
-          <div><span>Aktivní katalogy</span><strong>{candidateCount.toLocaleString("cs-CZ")}</strong></div>
+          <div><span>Načtené položky</span><strong>{candidateCount.toLocaleString("cs-CZ")}</strong></div>
           <div>
             <span>Poslední kontrola</span>
             <strong>{lastCompletedAt ? lastCompletedAt.toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}</strong>
           </div>
           <p>
-            Market search porovnává jen aktuálně potvrzené nabídky. Staré vyprodané produktové stránky do ceny nezapočítáváme.
+            Market search řadí jen cenově ověřené nabídky. Katalogová shoda bez ověřené ceny se zobrazí jako coverage, ne jako falešná nabídka.
           </p>
         </section>
       ) : (
@@ -652,7 +652,7 @@ export default function Home() {
 
       <footer className="shoppingFooter">
         <strong>Price Intelligence Engine</strong>
-        <span>Discovery: ABOUT YOU · Market search: Footshop + Queens · další e-shopy přidáváme přes stejný provider kontrakt.</span>
+        <span>Discovery: ABOUT YOU · Market: ABOUT YOU + Footshop + Queens · další e-shopy přidáváme přes stejný provider kontrakt.</span>
       </footer>
     </main>
   );
