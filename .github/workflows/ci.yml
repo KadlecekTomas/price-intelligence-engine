@@ -14,6 +14,8 @@ jobs:
         with:
           node-version: 22
       - run: npm install
+      - name: Temporary ABOUT YOU exact protobuf source discovery
+        run: node scripts/discover-aboutyou.mjs
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
